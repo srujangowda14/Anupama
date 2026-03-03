@@ -75,3 +75,46 @@ class SharedBiLSTMEncoder(nn.Module):
         final_hidden = torch.cat([fwd, bwd], dim=-1)  # (B, hidden_dim*2)
 
         return all_hidden, final_hidden
+
+class ClassifierHead(nn.Module):
+    def __init__(self, input_dim: int, num_classes: int, dropout: float = 0.3):
+        super().__init__()
+        self.net = nn.Sequential(
+            nn.Dropout(dropout),
+            nn.Linear(input_dim, input_dim // 2),
+            nn.GELU(),
+            nn.Dropout(dropout),
+            nn.Linear(input_dim // 2, num_classes),
+        )
+
+    def forward(self, x):
+        return self.net(x)
+    
+class CrisisClassifier(nn.Module):
+    """
+    3-class: 0=safe, 1=at_risk, 2=crisis
+    Uses weighted cross-entropy to handle class imbalance
+    (crisis examples are rare but critical).
+    """
+    NUM_CLASSES = 3
+    CLASS_NAMES = ["safe", "at_risk", "crisis"]
+    # Weight crisis class 5x, at_risk 3x to counteract imbalance
+    CLASS_WEIGHTS = [1.0, 3.0, 5.0]
+
+    def __init__(self, embedding: WordEmbedding, encoder: SharedBiLSTMEncoder):
+        super().__init__()
+        self.embedding = embedding
+        self.encoder = encoder
+        self.head = ClassifierHead(encoder.output_dim, self.NUM_CLASSES)
+
+    def forward(self, token_ids, lengths):
+        embedded = self.embedding(token_ids)
+        _, final = self.encoder(embedded, lengths)
+        logits = self.head(final)
+        return logits
+
+    def predict(self, token_ids, lengths):
+        logits = self.forward(token_ids, lengths)
+        probs = F.softmax(logits, dim=-1)
+        labels = torch.argmax(probs, dim=-1)
+        return labels, probs
