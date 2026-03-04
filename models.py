@@ -118,3 +118,90 @@ class CrisisClassifier(nn.Module):
         probs = F.softmax(logits, dim=-1)
         labels = torch.argmax(probs, dim=-1)
         return labels, probs
+    
+class SentimentDetector(nn.Module):
+    """
+    5-class mood score (1=very negative, 5=very positive).
+    Also returns a continuous valence score via regression head.
+    """
+    NUM_CLASSES = 5
+
+    def __init__(self, embedding: WordEmbedding, encoder: SharedBiLSTMEncoder):
+        super().__init__()
+        self.embedding = embedding
+        self.encoder = encoder
+        self.class_head = ClassifierHead(encoder.output_dim, self.NUM_CLASSES)
+        # Auxiliary regression head for smooth valence score
+        self.valence_head = nn.Sequential(
+            nn.Linear(encoder.output_dim, 64),
+            nn.GELU(),
+            nn.Linear(64, 1),
+            nn.Sigmoid(),  # output 0-1, scale to 1-5
+        )
+
+    def forward(self, token_ids, lengths):
+        embedded = self.embedding(token_ids)
+        _, final = self.encoder(embedded, lengths)
+        logits = self.class_head(final)
+        valence = self.valence_head(final).squeeze(-1) * 4 + 1  # 1-5 scale
+        return logits, valence
+
+    def predict(self, token_ids, lengths):
+        logits, valence = self.forward(token_ids, lengths)
+        probs = F.softmax(logits, dim=-1)
+        labels = torch.argmax(probs, dim=-1) + 1  # 1-indexed
+        return labels, valence.detach(), probs
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# MODEL 3: CBT DISTORTION TAGGER
+# ─────────────────────────────────────────────────────────────────────────────
+
+class CBTDistortionTagger(nn.Module):
+    """
+    11-class: 10 cognitive distortions + "none".
+    Uses attention pooling over all hidden states
+    (distortions often hinge on specific phrases, not just final state).
+    """
+    NUM_CLASSES = 11
+    CLASS_NAMES = [
+        "catastrophizing", "all_or_nothing", "mind_reading", "fortune_telling",
+        "emotional_reasoning", "should_statements", "labeling", "personalization",
+        "mental_filter", "discounting_positives", "none"
+    ]
+
+    def __init__(self, embedding: WordEmbedding, encoder: SharedBiLSTMEncoder):
+        super().__init__()
+        self.embedding = embedding
+        self.encoder = encoder
+
+        # Self-attention over encoder outputs for better phrase-level detection
+        self.attn = nn.Linear(encoder.output_dim, 1)
+        self.head = ClassifierHead(encoder.output_dim, self.NUM_CLASSES)
+
+    def attention_pool(self, all_hidden, mask=None):
+        """Soft attention pooling over encoder outputs."""
+        scores = self.attn(all_hidden).squeeze(-1)     # (B, T)
+        if mask is not None:
+            scores = scores.masked_fill(mask == 0, float("-inf"))
+        weights = F.softmax(scores, dim=-1).unsqueeze(-1)  # (B, T, 1)
+        pooled = (all_hidden * weights).sum(dim=1)     # (B, hidden_dim*2)
+        return pooled
+
+    def forward(self, token_ids, lengths):
+        embedded = self.embedding(token_ids)
+        all_hidden, _ = self.encoder(embedded, lengths)
+
+        # Build padding mask
+        B, T, _ = all_hidden.shape
+        mask = torch.arange(T, device=token_ids.device).unsqueeze(0) < lengths.unsqueeze(1)
+
+        pooled = self.attention_pool(all_hidden, mask)
+        logits = self.head(pooled)
+        return logits
+
+    def predict(self, token_ids, lengths):
+        logits = self.forward(token_ids, lengths)
+        probs = F.softmax(logits, dim=-1)
+        labels = torch.argmax(probs, dim=-1)
+        return labels, probs
