@@ -131,7 +131,8 @@ class SentimentDetector(nn.Module):
         self.embedding = embedding
         self.encoder = encoder
         self.class_head = ClassifierHead(encoder.output_dim, self.NUM_CLASSES)
-        # Auxiliary regression head for smooth valence score
+        # Auxiliary regression head for smooth valence score not only 0, 1, 2, 3, 4, 5 it gives 2.7, 3.8...
+        #captures intensity of sentiments good vs bad, bad vs terrible
         self.valence_head = nn.Sequential(
             nn.Linear(encoder.output_dim, 64),
             nn.GELU(),
@@ -205,3 +206,105 @@ class CBTDistortionTagger(nn.Module):
         probs = F.softmax(logits, dim=-1)
         labels = torch.argmax(probs, dim=-1)
         return labels, probs
+    
+class BahdanauAttention(nn.Module):
+    """
+    Bahdanau (additive) attention.
+    Scores each encoder timestep against current decoder hidden state.
+    """
+    def __init__(self, enc_dim: int, dec_dim: int, attn_dim: int = 128):
+        super().__init__()
+        self.W_enc = nn.Linear(enc_dim, attn_dim, bias=False)
+        self.W_dec = nn.Linear(dec_dim, attn_dim, bias=False)
+        self.v = nn.Linear(attn_dim, 1, bias=False)
+
+    def forward(self, enc_outputs, dec_hidden, src_mask=None):
+        """
+        enc_outputs: (B, T_src, enc_dim)
+        dec_hidden:  (B, dec_dim)
+        Returns:
+            context: (B, enc_dim)
+            attn_weights: (B, T_src)
+        """
+        enc_proj = self.W_enc(enc_outputs)               # (B, T, attn_dim)
+        dec_proj = self.W_dec(dec_hidden).unsqueeze(1)   # (B, 1, attn_dim)
+        scores = self.v(torch.tanh(enc_proj + dec_proj)).squeeze(-1)  # (B, T)
+
+        if src_mask is not None:
+            scores = scores.masked_fill(src_mask == 0, float("-inf"))
+
+        attn_weights = F.softmax(scores, dim=-1)         # (B, T)
+        context = (enc_outputs * attn_weights.unsqueeze(-1)).sum(dim=1)  # (B, enc_dim)
+        return context, attn_weights
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# MODEL 4: SEQ2SEQ RESPONSE GENERATOR
+# ─────────────────────────────────────────────────────────────────────────────
+
+class Seq2SeqDecoder(nn.Module):
+    def __init__(
+        self,
+        embedding: WordEmbedding,
+        vocab_size: int,
+        enc_dim: int,          # encoder output dim (hidden_dim * 2)
+        dec_hidden_dim: int = 512,
+        num_layers: int = 2,
+        dropout: float = 0.3,
+    ):
+        super().__init__()
+        self.embedding = embedding
+        self.dec_hidden_dim = dec_hidden_dim
+        self.num_layers = num_layers
+
+        self.attention = BahdanauAttention(enc_dim, dec_hidden_dim)
+        self.dropout = nn.Dropout(dropout)
+
+        # Input to decoder LSTM: [embed, context_vector]
+        self.lstm = nn.LSTM(
+            embedding.embed_dim + enc_dim,
+            dec_hidden_dim,
+            num_layers=num_layers,
+            batch_first=True,
+            dropout=dropout if num_layers > 1 else 0,
+        )
+
+        # Project encoder final hidden → decoder initial hidden
+        self.enc2dec_h = nn.Linear(enc_dim, dec_hidden_dim * num_layers)
+        self.enc2dec_c = nn.Linear(enc_dim, dec_hidden_dim * num_layers)
+
+        # Output projection
+        self.output_proj = nn.Linear(dec_hidden_dim + enc_dim + embedding.embed_dim, vocab_size)
+
+    def init_hidden(self, enc_final_hidden):
+        """Initialize decoder hidden state from encoder final state."""
+        B = enc_final_hidden.size(0)
+        h = self.enc2dec_h(enc_final_hidden)  # (B, dec_hidden * num_layers)
+        c = self.enc2dec_c(enc_final_hidden)
+
+        h = h.view(B, self.num_layers, self.dec_hidden_dim).transpose(0, 1).contiguous()
+        c = c.view(B, self.num_layers, self.dec_hidden_dim).transpose(0, 1).contiguous()
+        return h, c
+
+    def forward_step(self, token_ids, hidden, cell, enc_outputs, src_mask=None):
+        """
+        One decoder timestep.
+        token_ids: (B,)
+        Returns: logits (B, vocab_size), new hidden, new cell, attn_weights
+        """
+        embedded = self.dropout(self.embedding(token_ids.unsqueeze(1)))  # (B, 1, E)
+
+        dec_h_top = hidden[-1]  # top layer hidden: (B, dec_hidden)
+        context, attn_w = self.attention(enc_outputs, dec_h_top, src_mask)  # (B, enc_dim)
+
+        lstm_input = torch.cat([embedded, context.unsqueeze(1)], dim=-1)  # (B, 1, E+enc_dim)
+        lstm_out, (new_h, new_c) = self.lstm(lstm_input, (hidden, cell))  # (B, 1, dec_dim)
+
+        lstm_out = lstm_out.squeeze(1)  # (B, dec_dim)
+        emb_squeezed = embedded.squeeze(1)  # (B, E)
+
+        # Concatenate lstm output + context + embedding for rich output
+        proj_input = torch.cat([lstm_out, context, emb_squeezed], dim=-1)
+        logits = self.output_proj(proj_input)  # (B, vocab_size)
+
+        return logits, new_h, new_c, attn_w
