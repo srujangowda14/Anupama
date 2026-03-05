@@ -308,3 +308,123 @@ class Seq2SeqDecoder(nn.Module):
         logits = self.output_proj(proj_input)  # (B, vocab_size)
 
         return logits, new_h, new_c, attn_w
+
+class Seq2SeqGenerator(nn.Module):
+    """
+    Full seq2seq model:
+    - Encoder: SharedBiLSTMEncoder (shared with classifiers)
+    - Decoder: LSTM + Bahdanau attention
+    - Conditioning: crisis/mood/mode tokens prepended at decode time
+    """
+
+    def __init__(
+        self,
+        embedding: WordEmbedding,
+        encoder: SharedBiLSTMEncoder,
+        vocab_size: int,
+        dec_hidden_dim: int = 512,
+        num_dec_layers: int = 2,
+        dropout: float = 0.3,
+        pad_idx: int = 0,
+    ):
+        super().__init__()
+        self.embedding = embedding
+        self.encoder = encoder
+        self.pad_idx = pad_idx
+        self.vocab_size = vocab_size
+
+        self.decoder = Seq2SeqDecoder(
+            embedding=embedding,
+            vocab_size=vocab_size,
+            enc_dim=encoder.output_dim,
+            dec_hidden_dim=dec_hidden_dim,
+            num_layers=num_dec_layers,
+            dropout=dropout,
+        )
+
+    def forward(self, src_ids, src_lengths, dec_input_ids, teacher_forcing_ratio=0.5):
+        """
+        Training forward pass.
+        src_ids:       (B, T_src)
+        src_lengths:   (B,)
+        dec_input_ids: (B, T_tgt) — [SOS, cond_tokens..., tgt_tokens...]
+        Returns:
+            logits: (B, T_tgt, vocab_size)
+        """
+        B, T_tgt = dec_input_ids.shape
+
+        # Encode
+        src_embedded = self.embedding(src_ids)
+        enc_outputs, enc_final = self.encoder(src_embedded, src_lengths)  # (B,T,enc_dim), (B,enc_dim)
+
+        src_mask = (src_ids != self.pad_idx)  # (B, T_src)
+
+        # Init decoder
+        hidden, cell = self.decoder.init_hidden(enc_final)
+
+        all_logits = []
+        dec_token = dec_input_ids[:, 0]  # SOS token
+
+        for t in range(1, T_tgt):
+            logits, hidden, cell, _ = self.decoder.forward_step(
+                dec_token, hidden, cell, enc_outputs, src_mask
+            )
+            all_logits.append(logits.unsqueeze(1))
+
+            # Teacher forcing
+            use_tf = torch.rand(1).item() < teacher_forcing_ratio
+            if use_tf:
+                dec_token = dec_input_ids[:, t]
+            else:
+                dec_token = logits.argmax(dim=-1)
+
+        return torch.cat(all_logits, dim=1)  # (B, T_tgt-1, vocab_size)
+
+    @torch.no_grad()
+    def generate(
+        self,
+        src_ids,
+        src_lengths,
+        cond_ids,          # list of conditioning token ids
+        sos_idx: int,
+        eos_idx: int,
+        max_len: int = 80,
+        beam_size: int = 4,
+        temperature: float = 0.8,
+        top_p: float = 0.92,
+    ):
+        """
+        Inference: nucleus sampling with beam search option.
+        Returns list of token ids (the generated response).
+        """
+        self.eval()
+        device = src_ids.device
+
+        src_embedded = self.embedding(src_ids)
+        enc_outputs, enc_final = self.encoder(src_embedded, src_lengths)
+        src_mask = (src_ids != self.pad_idx)
+
+        hidden, cell = self.decoder.init_hidden(enc_final)
+
+        # Feed conditioning tokens first (deterministically)
+        dec_token = torch.tensor([sos_idx], device=device)
+        for cid in cond_ids:
+            cid_t = torch.tensor([cid], device=device)
+            _, hidden, cell, _ = self.decoder.forward_step(
+                cid_t, hidden, cell, enc_outputs, src_mask
+            )
+        dec_token = cid_t if cond_ids else dec_token
+
+        generated = []
+        for _ in range(max_len):
+            logits, hidden, cell, attn_w = self.decoder.forward_step(
+                dec_token, hidden, cell, enc_outputs, src_mask
+            )
+            # Nucleus (top-p) sampling
+            next_token = nucleus_sample(logits[0], temperature=temperature, top_p=top_p)
+            if next_token == eos_idx:
+                break
+            generated.append(next_token)
+            dec_token = torch.tensor([next_token], device=device)
+
+        return generated
