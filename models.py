@@ -428,3 +428,60 @@ class Seq2SeqGenerator(nn.Module):
             dec_token = torch.tensor([next_token], device=device)
 
         return generated
+
+# ─────────────────────────────────────────────────────────────────────────────
+# NUCLEUS SAMPLING
+# ─────────────────────────────────────────────────────────────────────────────
+
+def nucleus_sample(logits: torch.Tensor, temperature: float = 0.8, top_p: float = 0.92) -> int:
+    """Top-p (nucleus) sampling for diverse, coherent generation."""
+    logits = logits / temperature
+    probs = F.softmax(logits, dim=-1)
+
+    sorted_probs, sorted_idx = torch.sort(probs, descending=True)
+    cumulative = torch.cumsum(sorted_probs, dim=-1)
+
+    # Remove tokens with cumulative prob > top_p (keep at least 1)
+    remove_mask = cumulative - sorted_probs > top_p
+    sorted_probs[remove_mask] = 0.0
+    sorted_probs /= sorted_probs.sum()
+
+    sampled_idx = torch.multinomial(sorted_probs, 1).item()
+    return sorted_idx[sampled_idx].item()
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# FULL MULTI-TASK MODEL (all 4 models bundled for joint training)
+# ─────────────────────────────────────────────────────────────────────────────
+
+class AnupamaModel(nn.Module):
+    """
+    Wraps all 4 models with a shared embedding + shared encoder.
+    Supports joint training with a weighted multi-task loss.
+    """
+    def __init__(self, embedding_matrix: np.ndarray, vocab_size: int, pad_idx: int = 0):
+        super().__init__()
+
+        self.embedding = WordEmbedding(embedding_matrix, freeze=True)
+        self.encoder = SharedBiLSTMEncoder(
+            embed_dim=EMBED_DIM, hidden_dim=256, num_layers=2, dropout=0.3
+        )
+
+        self.crisis = CrisisClassifier(self.embedding, self.encoder)
+        self.sentiment = SentimentDetector(self.embedding, self.encoder)
+        self.distortion = CBTDistortionTagger(self.embedding, self.encoder)
+        self.generator = Seq2SeqGenerator(
+            self.embedding, self.encoder, vocab_size=vocab_size, pad_idx=pad_idx
+        )
+
+    def num_parameters(self) -> int:
+        return sum(p.numel() for p in self.parameters() if p.requires_grad)
+
+    def summary(self):
+        print(f"Anupama Model | Trainable params: {self.num_parameters():,}")
+        print(f"  Embedding: {sum(p.numel() for p in self.embedding.parameters()):,}")
+        print(f"  Encoder:   {sum(p.numel() for p in self.encoder.parameters()):,}")
+        print(f"  Crisis:    {sum(p.numel() for p in self.crisis.head.parameters()):,}")
+        print(f"  Sentiment: {sum(p.numel() for p in self.sentiment.parameters() if p.requires_grad):,}")
+        print(f"  Distortion:{sum(p.numel() for p in self.distortion.parameters() if p.requires_grad):,}")
+        print(f"  Generator: {sum(p.numel() for p in self.generator.decoder.parameters()):,}")
