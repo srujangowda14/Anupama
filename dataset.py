@@ -28,3 +28,14 @@ COND_TOKENS = [
     "<MODE_SUPPORT>", "<MODE_CBT>", "<MODE_INTAKE>",              # session mode
     "<DISTORTION>", "<NO_DISTORTION>",           # CBT signal
 ]
+
+# CBT cognitive distortion labels
+DISTORTION_LABELS = [
+    "catastrophizing", "all_or_nothing", "mind_reading", "fortune_telling",
+    "emotional_reasoning", "should_statements", "labeling", "personalization",
+    "mental_filter", "discounting_positives", "none"
+]
+
+CRISIS_LABELS = ["safe", "at_risk", "crisis"]
+SENTIMENT_LABELS = [1, 2, 3, 4, 5]  # mood scores
+
