@@ -115,6 +115,60 @@ class Vocabulary:
     def load(path: str) -> "Vocabulary":
         with open(path, "rb") as f:
             return pickle.load(f)
+        
+
+def build_embedding_matrix(
+    vocab: Vocabulary,
+    w2v_path: str,
+    embed_dim: int = EMBED_DIM,
+    binary: bool = True,
+) -> np.ndarray:
+    """
+    Load Google News Word2Vec vectors and build an embedding matrix
+    aligned to the vocabulary.
+
+    w2v_path: path to GoogleNews-vectors-negative300.bin
+              Download: https://code.google.com/archive/p/word2vec/
+              (or via: kaggle datasets download -d leadbest/googlenewsvectorsnegative300)
+    """
+    try:
+        from gensim.models import KeyedVectors
+    except ImportError:
+        raise ImportError("pip install gensim")
+
+    print(f"[Embeddings] Loading Word2Vec from {w2v_path}")
+    w2v = KeyedVectors.load_word2vec_format(w2v_path, binary=binary)
+    print(f"[Embeddings] Loaded {len(w2v)} vectors")
+
+    # Xavier uniform init for all tokens
+    matrix = np.random.uniform(-0.1, 0.1, (len(vocab), embed_dim)).astype(np.float32)
+
+    # Zero out PAD
+    matrix[vocab.pad_idx] = np.zeros(embed_dim)
+
+    hits = 0
+    for word, idx in vocab.word2idx.items():
+        if word in w2v:
+            matrix[idx] = w2v[word]
+            hits += 1
+
+    print(f"[Embeddings] Coverage: {hits}/{len(vocab)} tokens ({100*hits/len(vocab):.1f}%)")
+    return matrix
+
+
+def build_embedding_matrix_from_gensim(
+    vocab: Vocabulary,
+    w2v_model,          # already-loaded KeyedVectors
+    embed_dim: int = EMBED_DIM,
+) -> np.ndarray:
+    """Alternative: pass in an already-loaded gensim model."""
+    matrix = np.random.uniform(-0.1, 0.1, (len(vocab), embed_dim)).astype(np.float32)
+    matrix[vocab.pad_idx] = np.zeros(embed_dim)
+    for word, idx in vocab.word2idx.items():
+        if word in w2v_model:
+            matrix[idx] = w2v_model[word]
+    return matrix
+
 
 
 
