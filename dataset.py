@@ -169,6 +169,99 @@ def build_embedding_matrix_from_gensim(
             matrix[idx] = w2v_model[word]
     return matrix
 
+class ClassificationDataset(Dataset):
+    """
+    For crisis classifier, sentiment detector, and CBT distortion tagger.
+    Each sample: (text_tokens, label_int)
+    """
+
+    def __init__(
+        self,
+        samples: list[dict],   # [{"text": str, "label": int}, ...]
+        vocab: Vocabulary,
+        max_len: int = 128,
+    ):
+        self.vocab = vocab
+        self.max_len = max_len
+        self.data = []
+
+        for s in samples:
+            tokens = tokenize(s["text"])[:max_len]
+            ids = vocab.encode(tokens)
+            self.data.append({
+                "ids": torch.tensor(ids, dtype=torch.long),
+                "label": torch.tensor(s["label"], dtype=torch.long),
+                "length": len(ids),
+            })
+
+    def __len__(self): return len(self.data)
+    def __getitem__(self, i): return self.data[i]
+
+    @staticmethod
+    def collate(batch):
+        ids = pad_sequence(
+            [b["ids"] for b in batch], batch_first=True, padding_value=0
+        )
+        labels = torch.stack([b["label"] for b in batch])
+        lengths = torch.tensor([b["length"] for b in batch])
+        return ids, labels, lengths
+    
+class Seq2SeqDataset(Dataset):
+    """
+    For the response generator.
+    Each sample: (src_tokens, tgt_tokens, conditioning_tokens)
+    conditioning_tokens are prepended to the decoder input.
+    """
+
+    def __init__(
+        self,
+        pairs: list[dict],   # [{"src": str, "tgt": str, "cond": [str, ...]}]
+        vocab: Vocabulary,
+        max_src: int = 150,
+        max_tgt: int = 100,
+    ):
+        self.vocab = vocab
+        self.max_src = max_src
+        self.max_tgt = max_tgt
+        self.data = []
+
+        sos = vocab.sos_idx
+        eos = vocab.eos_idx
+
+        for p in pairs:
+            src_tokens = tokenize(p["src"])[:max_src]
+            tgt_tokens = tokenize(p["tgt"])[:max_tgt]
+
+            src_ids = vocab.encode(src_tokens)
+            tgt_ids = vocab.encode(tgt_tokens)
+
+            # Conditioning token indices (e.g. <CRISIS>, <MOOD_2>, <MODE_SUPPORT>)
+            cond_ids = [vocab.word2idx.get(c, vocab.unk_idx) for c in p.get("cond", [])]
+
+            # Decoder input:  [SOS, cond..., tgt...]
+            # Decoder target: [cond..., tgt..., EOS]
+            dec_input = [sos] + cond_ids + tgt_ids
+            dec_target = cond_ids + tgt_ids + [eos]
+
+            self.data.append({
+                "src": torch.tensor(src_ids, dtype=torch.long),
+                "dec_input": torch.tensor(dec_input, dtype=torch.long),
+                "dec_target": torch.tensor(dec_target, dtype=torch.long),
+            })
+
+    def __len__(self): return len(self.data)
+    def __getitem__(self, i): return self.data[i]
+
+    @staticmethod
+    def collate(batch):
+        src = pad_sequence([b["src"] for b in batch], batch_first=True, padding_value=0)
+        dec_input = pad_sequence([b["dec_input"] for b in batch], batch_first=True, padding_value=0)
+        dec_target = pad_sequence([b["dec_target"] for b in batch], batch_first=True, padding_value=0)
+        return src, dec_input, dec_target
+
+
+
+
 
 
 
