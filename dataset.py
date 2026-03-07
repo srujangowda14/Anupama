@@ -299,6 +299,50 @@ def load_empathetic_dialogues(csv_path: str) -> list[dict]:
                 prev = None
     return pairs
 
+def load_mental_health_counseling(jsonl_path: str) -> list[dict]:
+    """
+    HuggingFace: Amod/mental_health_counseling_conversations
+    Format: {"Context": ..., "Response": ...}
+    """
+    pairs = []
+    with open(jsonl_path) as f:
+        for line in f:
+            obj = json.loads(line)
+            ctx = obj.get("Context", "").strip()
+            resp = obj.get("Response", "").strip()
+            if ctx and resp:
+                pairs.append({"src": ctx[:300], "tgt": resp[:300], "cond": ["<SAFE>", "<MOOD_2>", "<MODE_SUPPORT>"]})
+    return pairs
+
+
+def load_crisis_data(jsonl_path: str) -> list[dict]:
+    """
+    Expected format: {"text": str, "label": "safe"|"at_risk"|"crisis"}
+    Sources: CLPsych 2015/2016 shared task, CSSRS-based datasets.
+    """
+    label_map = {"safe": 0, "at_risk": 1, "crisis": 2}
+    samples = []
+    with open(jsonl_path) as f:
+        for line in f:
+            obj = json.loads(line)
+            label = label_map.get(obj.get("label", "safe"), 0)
+            samples.append({"text": obj["text"], "label": label})
+    return samples
+
+
+def load_sentiment_data(jsonl_path: str) -> list[dict]:
+    """
+    Expected format: {"text": str, "score": 1-5}
+    Sources: SemEval emotional tweets, DAIC-WOZ PHQ scores mapped to 1-5.
+    """
+    samples = []
+    with open(jsonl_path) as f:
+        for line in f:
+            obj = json.loads(line)
+            score = max(1, min(5, int(obj.get("score", 3))))
+            samples.append({"text": obj["text"], "label": score - 1})  # 0-indexed
+    return samples
+
 
 
 
