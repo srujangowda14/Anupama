@@ -5,6 +5,7 @@ import pickle
 import numpy as np
 from collections import Counter
 from typing import Optional
+import csv
 
 import torch
 from torch.utils.data import Dataset
@@ -258,6 +259,46 @@ class Seq2SeqDataset(Dataset):
         dec_input = pad_sequence([b["dec_input"] for b in batch], batch_first=True, padding_value=0)
         dec_target = pad_sequence([b["dec_target"] for b in batch], batch_first=True, padding_value=0)
         return src, dec_input, dec_target
+    
+# ─────────────────────────────────────────────────────────────────────────────
+# DATA LOADERS (for the 4 public datasets)
+# ─────────────────────────────────────────────────────────────────────────────
+
+def load_counsel_chat(jsonl_path: str) -> list[dict]:
+    """
+    Load Counsel Chat dataset as seq2seq pairs.
+    HuggingFace: nbertagnolli/counsel-chat
+    Format: {"questionText": ..., "answerText": ...}
+    """
+    pairs = []
+    with open(jsonl_path) as f:
+        for line in f:
+            obj = json.loads(line)
+            q = obj.get("questionText", "").strip()
+            a = obj.get("answerText", "").strip()
+            if q and a and len(a) < 400:
+                pairs.append({"src": q, "tgt": a, "cond": ["<SAFE>", "<MOOD_3>", "<MODE_SUPPORT>"]})
+    return pairs
+
+
+def load_empathetic_dialogues(csv_path: str) -> list[dict]:
+    """
+    EmpatheticDialogues (Facebook Research).
+    https://github.com/facebookresearch/EmpatheticDialogues
+    """
+    pairs = []
+    with open(csv_path, newline="", encoding="utf-8") as f:
+        reader = csv.DictReader(f)
+        prev = None
+        for row in reader:
+            utt = row.get("utterance", "").replace("_comma_", ",").strip()
+            if row.get("speaker_idx") == "0":
+                prev = utt
+            elif prev and utt:
+                pairs.append({"src": prev, "tgt": utt, "cond": ["<SAFE>", "<MOOD_3>", "<MODE_SUPPORT>"]})
+                prev = None
+    return pairs
+
 
 
 
