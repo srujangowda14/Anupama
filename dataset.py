@@ -343,6 +343,21 @@ def load_sentiment_data(jsonl_path: str) -> list[dict]:
             samples.append({"text": obj["text"], "label": score - 1})  # 0-indexed
     return samples
 
+def load_distortion_data(jsonl_path: str) -> list[dict]:
+    """
+    Expected format: {"text": str, "distortion": "catastrophizing"|...|"none"}
+    Sources: Shreevastava et al. CogDistortions, AnnoMI dataset.
+    """
+    label_map = {d: i for i, d in enumerate(DISTORTION_LABELS)}
+    samples = []
+    with open(jsonl_path) as f:
+        for line in f:
+            obj = json.loads(line)
+            label = label_map.get(obj.get("distortion", "none"), len(DISTORTION_LABELS) - 1)
+            samples.append({"text": obj["text"], "label": label})
+    return samples
+
+
 
 
 
