@@ -111,4 +111,34 @@ class Anupama:
         id_tensor = torch.tensor([ids], dtype=torch.long, device=self.device)
         lengths = torch.tensor([len(ids)])
         return id_tensor, lengths
+    
+    @torch.no_grad()
+    def classify(self, text: str) -> ClassifierOutputs:
+        id_tensor, lengths = self._encode(text)
+
+        # Crisis
+        crisis_labels, crisis_probs = self.model.crisis.predict(id_tensor, lengths)
+        c_label = CRISIS_LABELS[crisis_labels[0].item()]
+        c_probs = crisis_probs[0].tolist()
+
+        # Sentiment
+        mood_labels, valence, sent_probs = self.model.sentiment.predict(id_tensor, lengths)
+        mood = mood_labels[0].item()
+        v = valence[0].item()
+
+        # Distortion
+        dist_labels, dist_probs = self.model.distortion.predict(id_tensor, lengths)
+        d_label = DISTORTION_LABELS[dist_labels[0].item()]
+        d_probs = dist_probs[0].tolist()
+
+        return ClassifierOutputs(
+            crisis_label=c_label,
+            crisis_probs=c_probs,
+            mood_score=mood,
+            valence=round(v, 2),
+            distortion=d_label,
+            distortion_probs=d_probs,
+        )
+
+
 
