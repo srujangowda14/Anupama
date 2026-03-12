@@ -139,6 +139,56 @@ class Anupama:
             distortion=d_label,
             distortion_probs=d_probs,
         )
+    
+    # ── Build conditioning tokens from classifier outputs ──────────────────
+
+    def _build_cond_tokens(self, cls_out: ClassifierOutputs, mode: str) -> list[str]:
+        cond = []
+
+        # Crisis token
+        cond.append(f"<{cls_out.crisis_label.upper()}>")
+
+        # Mood token
+        cond.append(f"<MOOD_{cls_out.mood_score}>")
+
+        # Mode token
+        cond.append(self.MODE_COND_TOKENS.get(mode, "<MODE_SUPPORT>"))
+
+        # Distortion signal
+        if cls_out.distortion != "none":
+            cond.append("<DISTORTION>")
+        else:
+            cond.append("<NO_DISTORTION>")
+
+        return cond
+
+    # ── Generate response ──────────────────────────────────────────────────
+
+    @torch.no_grad()
+    def _generate(self, text: str, cond_tokens: list[str]) -> str:
+        id_tensor, lengths = self._encode(text)
+
+        cond_ids = [
+            self.vocab.word2idx.get(tok, self.vocab.unk_idx)
+            for tok in cond_tokens
+        ]
+
+        token_ids = self.model.generator.generate(
+            src_ids=id_tensor,
+            src_lengths=lengths,
+            cond_ids=cond_ids,
+            sos_idx=self.vocab.sos_idx,
+            eos_idx=self.vocab.eos_idx,
+            max_len=self.max_gen_len,
+            temperature=self.temperature,
+            top_p=self.top_p,
+        )
+
+        tokens = self.vocab.decode(token_ids)
+        # Strip special tokens that leaked through
+        tokens = [t for t in tokens if not (t.startswith("<") and t.endswith(">"))]
+        return tokens_to_sentence(tokens)
+
 
 
 
