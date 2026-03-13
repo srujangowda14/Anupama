@@ -228,6 +228,33 @@ class Anupama:
                     "Let's slow down and look at this together — what's the situation you're facing?")
         return ("Thank you for sharing that with me. "
                 "How long have you been feeling this way?")
+    
+if __name__ == "__main__":
+    import sys
+
+    if len(sys.argv) < 2:
+        print("Usage: python engine.py <checkpoint_dir>")
+        sys.exit(1)
+
+    engine = Anupama.load(sys.argv[1])
+
+    test_inputs = [
+        ("I've been feeling really anxious about my job and can't sleep", "support"),
+        ("I always fail everything, I'm just a useless person", "cbt"),
+        ("I've been struggling for about three weeks now", "intake"),
+        ("I don't see any point in going on", "support"),  # should trigger crisis
+    ]
+
+    for text, mode in test_inputs:
+        print(f"\n{'─'*60}")
+        print(f"User [{mode}]: {text}")
+        result = engine.respond(text, mode)
+        print(f"Crisis: {result.is_crisis} | "
+              f"Mood: {result.classifiers.mood_score} | "
+              f"Distortion: {result.classifiers.distortion}")
+        print(f"Cond: {result.conditioning_tokens}")
+        print(f"Bot: {result.text}")
+
 
 
 
