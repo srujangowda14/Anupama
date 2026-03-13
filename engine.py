@@ -188,6 +188,47 @@ class Anupama:
         # Strip special tokens that leaked through
         tokens = [t for t in tokens if not (t.startswith("<") and t.endswith(">"))]
         return tokens_to_sentence(tokens)
+    
+    def respond(self, text: str, mode: str = "support") -> EngineResponse:
+        """
+        Full pipeline: classify input → build cond tokens → generate response.
+        Crisis inputs skip generation and return the crisis protocol.
+        """
+        cls_out = self.classify(text)
+
+        if cls_out.crisis_label == "crisis":
+            return EngineResponse(
+                text=self.CRISIS_PROTOCOL,
+                classifiers=cls_out,
+                is_crisis=True,
+                conditioning_tokens=[],
+            )
+
+        cond_tokens = self._build_cond_tokens(cls_out, mode)
+        response_text = self._generate(text, cond_tokens)
+
+        # Safety fallback: if generated response is too short or empty
+        if len(response_text.strip()) < 10:
+            response_text = self._fallback_response(cls_out, mode)
+
+        return EngineResponse(
+            text=response_text,
+            classifiers=cls_out,
+            is_crisis=False,
+            conditioning_tokens=cond_tokens,
+        )
+
+    def _fallback_response(self, cls_out: ClassifierOutputs, mode: str) -> str:
+        """Rule-based fallback when generation produces low-quality output."""
+        if cls_out.mood_score <= 2:
+            return ("It sounds like you're going through something really difficult. "
+                    "I'm here to listen. Would you like to share more about what's been happening?")
+        if cls_out.distortion != "none":
+            return ("I notice there might be some challenging thought patterns at play. "
+                    "Let's slow down and look at this together — what's the situation you're facing?")
+        return ("Thank you for sharing that with me. "
+                "How long have you been feeling this way?")
+
 
 
 
