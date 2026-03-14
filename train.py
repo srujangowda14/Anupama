@@ -56,3 +56,31 @@ class MultiTaskLoss(nn.Module):
         self.w_sentiment = 1.0
         self.w_distortion = 1.0
         self.w_gen = 1.5
+
+    def classifier_loss(self, crisis_logits, crisis_labels,
+                         sent_logits, sent_valence, sent_labels,
+                         dist_logits, dist_labels):
+        l_crisis = self.crisis_ce(crisis_logits, crisis_labels)
+
+        # Sentiment: classification + regression
+        l_sent_cls = self.sentiment_ce(sent_logits, sent_labels)
+        l_sent_reg = self.valence_mse(sent_valence, sent_labels.float() + 1)  # 1-indexed
+        l_sentiment = l_sent_cls + 0.3 * l_sent_reg
+
+        l_dist = self.distortion_ce(dist_logits, dist_labels)
+
+        total = (self.w_crisis * l_crisis
+                 + self.w_sentiment * l_sentiment
+                 + self.w_distortion * l_dist)
+        return total, {"crisis": l_crisis.item(), "sentiment": l_sentiment.item(), "distortion": l_dist.item()}
+    
+    def generator_loss(self, gen_logits, targets):
+        """
+        gen_logits: (B, T-1, vocab_size)
+        targets:    (B, T-1)
+        """
+        B, T, V = gen_logits.shape
+        l_gen = self.gen_ce(gen_logits.reshape(B * T, V), targets.reshape(B * T))
+        return self.w_gen * l_gen, {"gen": l_gen.item()}
+
+
