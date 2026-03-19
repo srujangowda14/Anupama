@@ -164,4 +164,29 @@ def train_generator_epoch(
 
     return total_loss / max(n, 1)
 
+@torch.no_grad()
+def evaluate_classifiers(model, crisis_loader, sent_loader, dist_loader, device):
+    model.eval()
+    crisis_acc = sent_acc = dist_acc = 0.0
+    n = 0
+
+    for (c_ids, c_labels, c_lens), (s_ids, s_labels, s_lens), (d_ids, d_labels, d_lens) in zip(
+        crisis_loader, sent_loader, dist_loader
+    ):
+        c_ids, c_labels = c_ids.to(device), c_labels.to(device)
+        s_ids, s_labels = s_ids.to(device), s_labels.to(device)
+        d_ids, d_labels = d_ids.to(device), d_labels.to(device)
+
+        crisis_acc += accuracy(model.crisis(c_ids, c_lens), c_labels)
+        s_logits, _ = model.sentiment(s_ids, s_lens)
+        sent_acc += accuracy(s_logits, s_labels)
+        dist_acc += accuracy(model.distortion(d_ids, d_lens), d_labels)
+        n += 1
+
+    return {
+        "crisis_acc": crisis_acc / max(n, 1),
+        "sentiment_acc": sent_acc / max(n, 1),
+        "distortion_acc": dist_acc / max(n, 1),
+    }
+
 
