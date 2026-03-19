@@ -82,5 +82,86 @@ class MultiTaskLoss(nn.Module):
         B, T, V = gen_logits.shape
         l_gen = self.gen_ce(gen_logits.reshape(B * T, V), targets.reshape(B * T))
         return self.w_gen * l_gen, {"gen": l_gen.item()}
+    
+def accuracy(logits, labels):
+    preds = logits.argmax(dim=-1)
+    return (preds == labels).float().mean().item()
+
+
+def compute_perplexity(avg_nll_loss):
+    return np.exp(avg_nll_loss)
+
+
+def train_classifiers_epoch(
+    model, crisis_loader, sent_loader, dist_loader,
+    optimizer, loss_fn, device, clip
+):
+    model.train()
+    total_loss = 0
+    n = 0
+
+    # Zip the three dataloaders — iterate together
+    for (c_ids, c_labels, c_lens), (s_ids, s_labels, s_lens), (d_ids, d_labels, d_lens) in zip(
+        crisis_loader, sent_loader, dist_loader
+    ):
+        c_ids, c_labels, c_lens = c_ids.to(device), c_labels.to(device), c_lens
+        s_ids, s_labels, s_lens = s_ids.to(device), s_labels.to(device), s_lens
+        d_ids, d_labels, d_lens = d_ids.to(device), d_labels.to(device), d_lens
+
+        optimizer.zero_grad()
+
+        crisis_logits = model.crisis(c_ids, c_lens)
+        sent_logits, sent_valence = model.sentiment(s_ids, s_lens)
+        dist_logits = model.distortion(d_ids, d_lens)
+
+        loss, details = loss_fn.classifier_loss(
+            crisis_logits, c_labels,
+            sent_logits, sent_valence, s_labels,
+            dist_logits, d_labels,
+        )
+
+        loss.backward()
+        nn.utils.clip_grad_norm_(model.parameters(), clip)
+        optimizer.step()
+
+        total_loss += loss.item()
+        n += 1
+
+    return total_loss / max(n, 1)
+
+def train_generator_epoch(
+    model, gen_loader, optimizer, loss_fn, device, clip,
+    teacher_forcing_ratio=0.5
+):
+    model.train()
+    total_loss = 0
+    n = 0
+
+    for src, dec_input, dec_target in gen_loader:
+        src = src.to(device)
+        dec_input = dec_input.to(device)
+        dec_target = dec_target.to(device)
+
+        src_lengths = (src != 0).sum(dim=1)
+
+        optimizer.zero_grad()
+
+        gen_logits = model.generator(
+            src, src_lengths, dec_input,
+            teacher_forcing_ratio=teacher_forcing_ratio
+        )
+
+        # Align: gen_logits is (B, T-1, V), targets are dec_target[:, 1:]
+        targets = dec_target[:, 1:gen_logits.size(1) + 1]
+        loss, details = loss_fn.generator_loss(gen_logits, targets)
+
+        loss.backward()
+        nn.utils.clip_grad_norm_(model.parameters(), clip)
+        optimizer.step()
+
+        total_loss += loss.item()
+        n += 1
+
+    return total_loss / max(n, 1)
 
 
