@@ -1,4 +1,6 @@
 import numpy as np
+from collections import Counter
+import math
 
 def classification_report(all_preds, all_labels, class_names):
     n = len(class_names)
@@ -23,3 +25,40 @@ def classification_report(all_preds, all_labels, class_names):
     report["macro_f1"] = round(macro_f1, 3)
     report["accuracy"] = round(acc, 3)
     return report
+
+def ngrams(tokens, n):
+    return Counter(tuple(tokens[i:i+n]) for i in range(len(tokens)-n+1))
+
+
+def bleu_score(references, hypotheses, max_n=4):
+    """Corpus BLEU-1 through BLEU-n."""
+    scores = []
+    for n in range(1, max_n + 1):
+        clipped = 0
+        total_hyp = 0
+        for ref, hyp in zip(references, hypotheses):
+            ref_ng = ngrams(ref, n)
+            hyp_ng = ngrams(hyp, n)
+            clipped += sum(min(c, ref_ng[gram]) for gram, c in hyp_ng.items())
+            total_hyp += max(len(hyp) - n + 1, 0)
+        precision = clipped / (total_hyp + 1e-9)
+        scores.append(precision)
+
+    # Brevity penalty
+    ref_len = sum(len(r) for r in references)
+    hyp_len = sum(len(h) for h in hypotheses)
+    bp = 1 if hyp_len >= ref_len else math.exp(1 - ref_len / (hyp_len + 1e-9))
+
+    bleu = bp * math.exp(sum(math.log(s + 1e-9) for s in scores) / max_n)
+    return {f"bleu_{n}": round(scores[n-1], 4) for n in range(1, max_n + 1)} | {"bleu": round(bleu, 4)}
+
+
+def distinct_n(all_tokens, n):
+    """Distinct-n: ratio of unique n-grams (measures diversity)."""
+    all_ng = []
+    for tokens in all_tokens:
+        all_ng.extend(tuple(tokens[i:i+n]) for i in range(len(tokens)-n+1))
+    if not all_ng:
+        return 0.0
+    return round(len(set(all_ng)) / len(all_ng), 4)
+
