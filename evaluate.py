@@ -1,6 +1,11 @@
 import numpy as np
 from collections import Counter
 import math
+import torch
+
+from dataset import (
+    tokenize, DISTORTION_LABELS, CRISIS_LABELS,
+)
 
 def classification_report(all_preds, all_labels, class_names):
     n = len(class_names)
@@ -61,4 +66,71 @@ def distinct_n(all_tokens, n):
     if not all_ng:
         return 0.0
     return round(len(set(all_ng)) / len(all_ng), 4)
+
+@torch.no_grad()
+def evaluate_crisis(engine, test_samples):
+    preds, labels = [], []
+    for s in test_samples:
+        cls = engine.classify(s["text"])
+        preds.append(CRISIS_LABELS.index(cls.crisis_label))
+        labels.append(s["label"])
+    return classification_report(preds, labels, CRISIS_LABELS)
+
+
+@torch.no_grad()
+def evaluate_sentiment(engine, test_samples):
+    preds, labels, valences = [], [], []
+    for s in test_samples:
+        cls = engine.classify(s["text"])
+        preds.append(cls.mood_score)
+        labels.append(s["label"] + 1)  # back to 1-indexed
+        valences.append(cls.valence)
+
+    acc = sum(p == l for p, l in zip(preds, labels)) / len(preds)
+    mae = np.mean(np.abs(np.array(preds) - np.array(labels)))
+
+    # Pearson correlation between predicted valence and true label
+    corr = np.corrcoef(valences, labels)[0, 1]
+
+    return {
+        "accuracy": round(acc, 3),
+        "mae": round(mae, 3),
+        "pearson_r": round(corr, 3),
+    }
+
+
+@torch.no_grad()
+def evaluate_distortion(engine, test_samples):
+    preds, labels = [], []
+    for s in test_samples:
+        cls = engine.classify(s["text"])
+        preds.append(DISTORTION_LABELS.index(cls.distortion))
+        labels.append(s["label"])
+    return classification_report(preds, labels, DISTORTION_LABELS)
+
+
+@torch.no_grad()
+def evaluate_generator(engine, test_pairs, n_samples=200, mode="support"):
+    references, hypotheses = [], []
+
+    for pair in test_pairs[:n_samples]:
+        result = engine.respond(pair["src"], mode=mode)
+        hyp_tokens = tokenize(result.text)
+        ref_tokens = tokenize(pair["tgt"])
+        hypotheses.append(hyp_tokens)
+        references.append(ref_tokens)
+
+    bleu = bleu_score(references, hypotheses)
+    dist1 = distinct_n(hypotheses, 1)
+    dist2 = distinct_n(hypotheses, 2)
+    avg_len = np.mean([len(h) for h in hypotheses])
+
+    return {
+        **bleu,
+        "distinct_1": dist1,
+        "distinct_2": dist2,
+        "avg_response_length": round(avg_len, 1),
+    }
+
+
 
