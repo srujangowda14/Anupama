@@ -2,10 +2,19 @@ import numpy as np
 from collections import Counter
 import math
 import torch
+import argparse
+import json
 
 from dataset import (
     tokenize, DISTORTION_LABELS, CRISIS_LABELS,
 )
+
+from dataset import (
+    load_counsel_chat,
+    load_crisis_data, load_sentiment_data, load_distortion_data,
+    tokenize, DISTORTION_LABELS,
+)
+from models import AnupamaModel
 
 def classification_report(all_preds, all_labels, class_names):
     n = len(class_names)
@@ -131,6 +140,59 @@ def evaluate_generator(engine, test_pairs, n_samples=200, mode="support"):
         "distinct_2": dist2,
         "avg_response_length": round(avg_len, 1),
     }
+
+def get_args():
+    p = argparse.ArgumentParser()
+    p.add_argument("--checkpoint_dir", required=True)
+    p.add_argument("--crisis", required=True)
+    p.add_argument("--sentiment", required=True)
+    p.add_argument("--distortion", required=True)
+    p.add_argument("--gen_pairs", required=True)
+    p.add_argument("--n_gen_samples", type=int, default=200)
+    p.add_argument("--output", default="evaluation_results.json")
+    return p.parse_args()
+
+
+def main():
+    args = get_args()
+
+    print("[Eval] Loading engine...")
+    engine = AnupamaModel.load(args.checkpoint_dir)
+
+    print("[Eval] Loading test data...")
+    crisis_test = load_crisis_data(args.crisis)
+    sent_test = load_sentiment_data(args.sentiment)
+    dist_test = load_distortion_data(args.distortion)
+    gen_pairs = load_counsel_chat(args.gen_pairs)
+
+    results = {}
+
+    print("[Eval] Crisis classifier...")
+    results["crisis"] = evaluate_crisis(engine, crisis_test)
+    print(f"  Accuracy: {results['crisis']['accuracy']} | Macro-F1: {results['crisis']['macro_f1']}")
+    print(f"  Crisis class F1: {results['crisis']['crisis']['f1']}")
+
+    print("[Eval] Sentiment detector...")
+    results["sentiment"] = evaluate_sentiment(engine, sent_test)
+    print(f"  Accuracy: {results['sentiment']['accuracy']} | MAE: {results['sentiment']['mae']} | Pearson: {results['sentiment']['pearson_r']}")
+
+    print("[Eval] CBT distortion tagger...")
+    results["distortion"] = evaluate_distortion(engine, dist_test)
+    print(f"  Accuracy: {results['distortion']['accuracy']} | Macro-F1: {results['distortion']['macro_f1']}")
+
+    print(f"[Eval] Generator (n={args.n_gen_samples})...")
+    results["generator"] = evaluate_generator(engine, gen_pairs, n_samples=args.n_gen_samples)
+    print(f"  BLEU-4: {results['generator']['bleu']} | Distinct-2: {results['generator']['distinct_2']}")
+
+    with open(args.output, "w") as f:
+        json.dump(results, f, indent=2)
+
+    print(f"\nResults saved to {args.output}")
+
+
+if __name__ == "__main__":
+    main()
+
 
 
 
