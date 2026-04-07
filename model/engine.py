@@ -12,7 +12,7 @@ from dataset import (
     Vocabulary, tokenize, DISTORTION_LABELS, CRISIS_LABELS,
     PAD_TOKEN, SOS_TOKEN, EOS_TOKEN,
 )
-from models import AnupamaModel
+from model.models import AnupamaModel
 
 @dataclass
 class ClassifierOutputs:

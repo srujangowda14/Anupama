@@ -14,7 +14,7 @@ from dataset import (
     load_crisis_data, load_sentiment_data, load_distortion_data,
     tokenize, DISTORTION_LABELS,
 )
-from models import AnupamaModel
+from model.models import AnupamaModel
 
 def classification_report(all_preds, all_labels, class_names):
     n = len(class_names)

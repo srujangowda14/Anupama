@@ -17,7 +17,7 @@ from dataset import (
     tokenize, DISTORTION_LABELS,
 )
 
-from models import AnupamaModel
+from model.models import AnupamaModel
 
 
 def get_args():
