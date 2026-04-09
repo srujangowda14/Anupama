@@ -9,7 +9,7 @@ import time
 import torch.optim as optim
 from torch.utils.data import DataLoader, random_split
 
-from dataset import (
+from .dataset import (
     Vocabulary, build_embedding_matrix,
     ClassificationDataset, Seq2SeqDataset,
     load_counsel_chat, load_mental_health_counseling,
@@ -17,8 +17,7 @@ from dataset import (
     tokenize, DISTORTION_LABELS,
 )
 
-from model.models import AnupamaModel
-
+from .models import AnupamaModel
 
 def get_args():
     p = argparse.ArgumentParser()
