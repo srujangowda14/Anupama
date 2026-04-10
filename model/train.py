@@ -252,14 +252,6 @@ def main():
     args = get_args()
     set_seed(args.seed)
 
-    optimizer = optim.AdamW([
-    {"params": model.crisis.head.parameters(),     "lr": 3e-4},
-    {"params": model.sentiment.parameters(),       "lr": 1e-3},
-    {"params": model.distortion.head.parameters(), "lr": 3e-4},
-    {"params": model.encoder.parameters(),         "lr": 5e-4},
-    {"params": model.generator.decoder.parameters(),"lr": 1e-3},
-    ], weight_decay=1e-4)
-
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     print(f"[Train] Device: {device}")
     os.makedirs(args.output_dir, exist_ok=True)
@@ -329,7 +321,16 @@ def main():
     # ── 5. Build model ────────────────────────────────────────────────────────
     model = AnupamaModel(embed_matrix, len(vocab), pad_idx=vocab.pad_idx).to(device)
     model.summary()
-    
+
+
+    optimizer = optim.AdamW([
+    {"params": model.crisis.head.parameters(),     "lr": 3e-4},
+    {"params": model.sentiment.parameters(),       "lr": 1e-3},
+    {"params": model.distortion.head.parameters(), "lr": 3e-4},
+    {"params": model.encoder.parameters(),         "lr": 5e-4},
+    {"params": model.generator.decoder.parameters(),"lr": 1e-3},
+    ], weight_decay=1e-4)
+
     scheduler = optim.lr_scheduler.CosineAnnealingLR(
         optimizer, T_max=args.epochs_cls + args.epochs_joint
     )
