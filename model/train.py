@@ -18,6 +18,51 @@ from .dataset import (
 )
 
 from .models import AnupamaModel
+from itertools import cycle
+
+def train_classifiers_epoch(
+    model, crisis_loader, sent_loader, dist_loader,
+    optimizer, loss_fn, device, clip
+):
+    model.train()
+    total_loss = 0
+    n = 0
+
+    # Cycle smaller datasets so zip runs for the full length of the largest
+    longest = max(len(crisis_loader), len(sent_loader), len(dist_loader))
+    crisis_iter = cycle(crisis_loader)
+    sent_iter   = cycle(sent_loader)
+    dist_iter   = cycle(dist_loader)
+
+    for _ in range(longest):
+        c_ids, c_labels, c_lens = next(crisis_iter)
+        s_ids, s_labels, s_lens = next(sent_iter)
+        d_ids, d_labels, d_lens = next(dist_iter)
+
+        c_ids, c_labels = c_ids.to(device), c_labels.to(device)
+        s_ids, s_labels = s_ids.to(device), s_labels.to(device)
+        d_ids, d_labels = d_ids.to(device), d_labels.to(device)
+
+        optimizer.zero_grad()
+
+        crisis_logits = model.crisis(c_ids, c_lens)
+        sent_logits, sent_valence = model.sentiment(s_ids, s_lens)
+        dist_logits = model.distortion(d_ids, d_lens)
+
+        loss, details = loss_fn.classifier_loss(
+            crisis_logits, c_labels,
+            sent_logits, sent_valence, s_labels,
+            dist_logits, d_labels,
+        )
+
+        loss.backward()
+        nn.utils.clip_grad_norm_(model.parameters(), clip)
+        optimizer.step()
+
+        total_loss += loss.item()
+        n += 1
+
+    return total_loss / max(n, 1)
 
 def get_args():
     p = argparse.ArgumentParser()
@@ -207,6 +252,14 @@ def main():
     args = get_args()
     set_seed(args.seed)
 
+    optimizer = optim.AdamW([
+    {"params": model.crisis.head.parameters(),     "lr": 3e-4},
+    {"params": model.sentiment.parameters(),       "lr": 1e-3},
+    {"params": model.distortion.head.parameters(), "lr": 3e-4},
+    {"params": model.encoder.parameters(),         "lr": 5e-4},
+    {"params": model.generator.decoder.parameters(),"lr": 1e-3},
+    ], weight_decay=1e-4)
+
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     print(f"[Train] Device: {device}")
     os.makedirs(args.output_dir, exist_ok=True)
@@ -276,11 +329,7 @@ def main():
     # ── 5. Build model ────────────────────────────────────────────────────────
     model = AnupamaModel(embed_matrix, len(vocab), pad_idx=vocab.pad_idx).to(device)
     model.summary()
-
-    optimizer = optim.AdamW(
-        filter(lambda p: p.requires_grad, model.parameters()),
-        lr=args.lr, weight_decay=1e-4
-    )
+    
     scheduler = optim.lr_scheduler.CosineAnnealingLR(
         optimizer, T_max=args.epochs_cls + args.epochs_joint
     )
