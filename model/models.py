@@ -195,6 +195,7 @@ class CBTDistortionTagger(nn.Module):
 
         # Build padding mask
         B, T, _ = all_hidden.shape
+        lengths = lengths.to(token_ids.device)
         mask = torch.arange(T, device=token_ids.device).unsqueeze(0) < lengths.unsqueeze(1)
 
         pooled = self.attention_pool(all_hidden, mask)

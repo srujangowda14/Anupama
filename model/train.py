@@ -323,13 +323,7 @@ def main():
     model.summary()
 
 
-    optimizer = optim.AdamW([
-    {"params": model.crisis.head.parameters(),     "lr": 3e-4},
-    {"params": model.sentiment.parameters(),       "lr": 1e-3},
-    {"params": model.distortion.head.parameters(), "lr": 3e-4},
-    {"params": model.encoder.parameters(),         "lr": 5e-4},
-    {"params": model.generator.decoder.parameters(),"lr": 1e-3},
-    ], weight_decay=1e-4)
+    optimizer = optim.AdamW(model.parameters(), lr=5e-4, weight_decay=1e-4)
 
     scheduler = optim.lr_scheduler.CosineAnnealingLR(
         optimizer, T_max=args.epochs_cls + args.epochs_joint
