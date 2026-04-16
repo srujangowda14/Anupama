@@ -8,11 +8,18 @@ import numpy as np
 import sys
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
-from dataset import (
-    Vocabulary, tokenize, DISTORTION_LABELS, CRISIS_LABELS,
-    PAD_TOKEN, SOS_TOKEN, EOS_TOKEN,
-)
-from model.models import AnupamaModel
+try:
+    from .dataset import (
+        Vocabulary, tokenize, DISTORTION_LABELS, CRISIS_LABELS,
+        PAD_TOKEN, SOS_TOKEN, EOS_TOKEN,
+    )
+    from .models import AnupamaModel
+except ImportError:
+    from dataset import (
+        Vocabulary, tokenize, DISTORTION_LABELS, CRISIS_LABELS,
+        PAD_TOKEN, SOS_TOKEN, EOS_TOKEN,
+    )
+    from model.models import AnupamaModel
 
 @dataclass
 class ClassifierOutputs:
@@ -254,7 +261,6 @@ if __name__ == "__main__":
               f"Distortion: {result.classifiers.distortion}")
         print(f"Cond: {result.conditioning_tokens}")
         print(f"Bot: {result.text}")
-
 
 
 
