@@ -3,6 +3,7 @@ import subprocess
 import sys
 from pathlib import Path
 from urllib.parse import parse_qs, urlparse
+from urllib.request import build_opener, HTTPCookieProcessor, Request
 
 
 ROOT_DIR = Path(__file__).resolve().parent.parent
@@ -43,11 +44,45 @@ def ensure_file_from_env(env_name: str, target_name: str) -> None:
     print(f"[startup] Downloading {target_name} from {env_name}...")
     file_id = extract_google_drive_id(url)
     if file_id:
-        command = [sys.executable, "-m", "gdown", "--id", file_id, "-O", str(target_path)]
+        download_google_drive_file(file_id, target_path)
     else:
-        command = [sys.executable, "-m", "gdown", url, "-O", str(target_path)]
+        raise RuntimeError(f"Unsupported download URL for {env_name}. Use a Google Drive share link.")
 
-    subprocess.run(command, check=True)
+
+def download_google_drive_file(file_id: str, target_path: Path) -> None:
+    opener = build_opener(HTTPCookieProcessor())
+    base_url = f"https://drive.google.com/uc?export=download&id={file_id}"
+
+    with opener.open(Request(base_url, headers={"User-Agent": "Mozilla/5.0"})) as response:
+        html = response.read().decode("utf-8", errors="ignore")
+
+    confirm_token = None
+    for marker in ("confirm=", "confirm=t&confirm="):
+        if marker in html:
+            fragment = html.split(marker, 1)[1]
+            confirm_token = fragment.split("&", 1)[0].split('"', 1)[0]
+            break
+
+    download_url = base_url if not confirm_token else (
+        f"https://drive.google.com/uc?export=download&confirm={confirm_token}&id={file_id}"
+    )
+
+    with opener.open(Request(download_url, headers={"User-Agent": "Mozilla/5.0"})) as response:
+        content_type = response.headers.get("Content-Type", "")
+        if "text/html" in content_type:
+            body = response.read().decode("utf-8", errors="ignore")
+            raise RuntimeError(
+                "Google Drive download failed. Make sure the file is shared as "
+                "'Anyone with the link' and that download quota is not exceeded.\n"
+                f"Response snippet: {body[:300]}"
+            )
+
+        with open(target_path, "wb") as output_file:
+            while True:
+                chunk = response.read(1024 * 1024)
+                if not chunk:
+                    break
+                output_file.write(chunk)
 
 
 def main() -> None:
