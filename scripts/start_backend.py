@@ -1,4 +1,5 @@
 import os
+import re
 import subprocess
 import sys
 from pathlib import Path
@@ -57,11 +58,15 @@ def download_google_drive_file(file_id: str, target_path: Path) -> None:
         html = response.read().decode("utf-8", errors="ignore")
 
     confirm_token = None
-    for marker in ("confirm=", "confirm=t&confirm="):
-        if marker in html:
-            fragment = html.split(marker, 1)[1]
-            confirm_token = fragment.split("&", 1)[0].split('"', 1)[0]
-            break
+    token_match = re.search(r'name="confirm"\s+value="([^"]+)"', html)
+    if token_match:
+        confirm_token = token_match.group(1)
+    else:
+        for marker in ("confirm=", "confirm=t&confirm="):
+            if marker in html:
+                fragment = html.split(marker, 1)[1]
+                confirm_token = fragment.split("&", 1)[0].split('"', 1)[0]
+                break
 
     download_url = base_url if not confirm_token else (
         f"https://drive.google.com/uc?export=download&confirm={confirm_token}&id={file_id}"
