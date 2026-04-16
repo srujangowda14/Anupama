@@ -1,9 +1,10 @@
 import os
+import html as html_lib
 import re
 import subprocess
 import sys
 from pathlib import Path
-from urllib.parse import parse_qs, urlparse
+from urllib.parse import parse_qs, urlencode, urljoin, urlparse
 from urllib.request import build_opener, HTTPCookieProcessor, Request
 
 
@@ -57,20 +58,34 @@ def download_google_drive_file(file_id: str, target_path: Path) -> None:
     with opener.open(Request(base_url, headers={"User-Agent": "Mozilla/5.0"})) as response:
         html = response.read().decode("utf-8", errors="ignore")
 
-    confirm_token = None
-    token_match = re.search(r'name="confirm"\s+value="([^"]+)"', html)
-    if token_match:
-        confirm_token = token_match.group(1)
-    else:
-        for marker in ("confirm=", "confirm=t&confirm="):
-            if marker in html:
-                fragment = html.split(marker, 1)[1]
-                confirm_token = fragment.split("&", 1)[0].split('"', 1)[0]
-                break
+    download_url = base_url
 
-    download_url = base_url if not confirm_token else (
-        f"https://drive.google.com/uc?export=download&confirm={confirm_token}&id={file_id}"
-    )
+    form_match = re.search(r'<form[^>]+id="download-form"[^>]+action="([^"]+)"', html)
+    if form_match:
+        action = html_lib.unescape(form_match.group(1))
+        hidden_inputs = re.findall(
+            r'<input[^>]+type="hidden"[^>]+name="([^"]+)"[^>]+value="([^"]*)"',
+            html,
+        )
+        params = {name: html_lib.unescape(value) for name, value in hidden_inputs}
+        params.setdefault("id", file_id)
+        download_url = urljoin("https://drive.google.com", action)
+        if params:
+            download_url = f"{download_url}?{urlencode(params)}"
+    else:
+        confirm_token = None
+        token_match = re.search(r'name="confirm"\s+value="([^"]+)"', html)
+        if token_match:
+            confirm_token = token_match.group(1)
+        else:
+            for marker in ("confirm=", "confirm=t&confirm="):
+                if marker in html:
+                    fragment = html.split(marker, 1)[1]
+                    confirm_token = fragment.split("&", 1)[0].split('"', 1)[0]
+                    break
+
+        if confirm_token:
+            download_url = f"https://drive.google.com/uc?export=download&confirm={confirm_token}&id={file_id}"
 
     with opener.open(Request(download_url, headers={"User-Agent": "Mozilla/5.0"})) as response:
         content_type = response.headers.get("Content-Type", "")
