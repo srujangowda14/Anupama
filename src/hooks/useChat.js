@@ -1,4 +1,4 @@
-import { useState, useCallback, useRef } from "react";
+import { useState, useCallback } from "react";
 import { api } from "../utils/api";
 
 export function useChat(mode) {
@@ -6,8 +6,6 @@ export function useChat(mode) {
   const [sessionId, setSessionId] = useState(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState(null);
-  const abortRef = useRef(null);
-
   const addMessage = useCallback((msg) => {
     setMessages((prev) => [...prev, { id: Date.now() + Math.random(), ...msg }]);
   }, []);
