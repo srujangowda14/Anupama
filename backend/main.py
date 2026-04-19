@@ -126,6 +126,15 @@ app.add_middleware(
 SESSIONS: dict[str, SessionState] = {}
 
 
+@app.get("/")
+def root():
+    return {
+        "name": "Anupama API",
+        "status": "ok",
+        "health": "/health",
+    }
+
+
 @app.get("/health")
 def health():
     checkpoint_dir = Path(os.getenv("MINDFUL_CHECKPOINT_DIR", DEFAULT_CHECKPOINT_DIR))
