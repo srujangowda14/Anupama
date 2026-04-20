@@ -10,6 +10,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel, Field
 
 from model.engine import Anupama
+from backend.openai_responder import generate_reply
 
 
 ROOT_DIR = Path(__file__).resolve().parent.parent
@@ -145,6 +146,7 @@ def health():
     return {
         "status": "ok",
         "model_ready": bool(model_ready),
+        "openai_ready": bool(os.getenv("OPENAI_API_KEY")),
         "checkpoint_dir": str(checkpoint_dir),
         "timestamp": utc_now(),
     }
@@ -171,28 +173,46 @@ def chat(payload: ChatRequest):
     )
     session.history.append(user_turn)
 
-    result = engine.respond(payload.message.strip(), mode=payload.mode)
+    classification = engine.classify(payload.message.strip())
+    is_crisis = classification.crisis_label == "crisis"
+    conditioning_tokens = engine._build_cond_tokens(classification, payload.mode) if not is_crisis else []
+
+    if is_crisis:
+        reply_text = engine.CRISIS_PROTOCOL
+    else:
+        try:
+            reply_text = generate_reply(
+                message=payload.message.strip(),
+                mode=payload.mode,
+                history=[turn.model_dump() for turn in session.history[:-1]],
+                mood_score=classification.mood_score,
+                distortion=classification.distortion,
+                crisis_label=classification.crisis_label,
+            )
+        except Exception as exc:
+            raise HTTPException(status_code=500, detail=f"OpenAI generation failed: {exc}") from exc
+
     assistant_turn = ChatTurn(
         role="assistant",
-        content=result.text,
+        content=reply_text,
         timestamp=utc_now(),
         mode=payload.mode,
-        mood_score=result.classifiers.mood_score,
-        distortion=result.classifiers.distortion,
-        is_crisis=result.is_crisis,
+        mood_score=classification.mood_score,
+        distortion=classification.distortion,
+        is_crisis=is_crisis,
     )
     session.history.append(assistant_turn)
 
     return {
         "session_id": session_id,
-        "reply": result.text,
+        "reply": reply_text,
         "timestamp": assistant_turn.timestamp,
-        "is_crisis": result.is_crisis,
-        "mood_score": result.classifiers.mood_score,
-        "valence": result.classifiers.valence,
-        "distortion": result.classifiers.distortion,
-        "crisis_label": result.classifiers.crisis_label,
-        "conditioning_tokens": result.conditioning_tokens,
+        "is_crisis": is_crisis,
+        "mood_score": classification.mood_score,
+        "valence": classification.valence,
+        "distortion": classification.distortion,
+        "crisis_label": classification.crisis_label,
+        "conditioning_tokens": conditioning_tokens,
     }
 
 
