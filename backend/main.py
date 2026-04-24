@@ -1,4 +1,5 @@
 import os
+import re
 from datetime import datetime, timezone
 from functools import lru_cache
 from pathlib import Path
@@ -47,6 +48,40 @@ class SessionState(BaseModel):
 
 def utc_now() -> str:
     return datetime.now(timezone.utc).isoformat()
+
+
+SELF_HARM_PATTERNS = [
+    r"\bkill myself\b",
+    r"\bend my life\b",
+    r"\bwant to die\b",
+    r"\bsuicid(?:e|al)\b",
+    r"\bself[- ]harm\b",
+    r"\bhurt myself\b",
+    r"\boverdose\b",
+]
+
+VIOLENCE_PATTERNS = [
+    r"\bhit me\b",
+    r"\bhurt me\b",
+    r"\bbeat me\b",
+    r"\bassault(?:ed)?\b",
+    r"\babus(?:e|ed|ive)\b",
+    r"\battacked me\b",
+    r"\bthey hit me\b",
+    r"\bsomebody hit me\b",
+]
+
+VIOLENCE_SAFETY_RESPONSE = (
+    "I'm sorry that happened to you. No one deserves to be hit or hurt. "
+    "Are you safe right now? If you're in immediate danger, call emergency services now "
+    "or go to a nearby safe place and contact someone you trust. If you want, you can tell me "
+    "what happened and whether the person is still near you."
+)
+
+
+def has_pattern(text: str, patterns: list[str]) -> bool:
+    lowered = text.lower()
+    return any(re.search(pattern, lowered) for pattern in patterns)
 
 
 def build_summary(session: SessionState) -> str:
@@ -175,11 +210,15 @@ def chat(payload: ChatRequest):
     session.history.append(user_turn)
 
     classification = engine.classify(payload.message.strip())
-    is_crisis = classification.crisis_label == "crisis"
+    explicit_self_harm = has_pattern(payload.message, SELF_HARM_PATTERNS)
+    violence_disclosure = has_pattern(payload.message, VIOLENCE_PATTERNS)
+    is_crisis = classification.crisis_label == "crisis" and explicit_self_harm
     conditioning_tokens = engine._build_cond_tokens(classification, payload.mode) if not is_crisis else []
 
     if is_crisis:
         reply_text = engine.CRISIS_PROTOCOL
+    elif violence_disclosure:
+        reply_text = VIOLENCE_SAFETY_RESPONSE
     else:
         try:
             reply_text = generate_reply(
