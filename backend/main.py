@@ -146,7 +146,8 @@ def health():
     return {
         "status": "ok",
         "model_ready": bool(model_ready),
-        "openai_ready": bool(os.getenv("OPENAI_API_KEY")),
+        "hf_ready": bool(os.getenv("HF_TOKEN")),
+        "llm_provider": "huggingface",
         "checkpoint_dir": str(checkpoint_dir),
         "timestamp": utc_now(),
     }
@@ -190,7 +191,7 @@ def chat(payload: ChatRequest):
                 crisis_label=classification.crisis_label,
             )
         except Exception as exc:
-            raise HTTPException(status_code=500, detail=f"OpenAI generation failed: {exc}") from exc
+            raise HTTPException(status_code=500, detail=f"Hugging Face generation failed: {exc}") from exc
 
     assistant_turn = ChatTurn(
         role="assistant",

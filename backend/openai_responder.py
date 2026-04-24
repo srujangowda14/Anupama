@@ -31,12 +31,18 @@ BASE_INSTRUCTIONS = (
 )
 
 
+HF_BASE_URL = "https://router.huggingface.co/v1"
+
+
 @lru_cache(maxsize=1)
 def get_client() -> OpenAI:
-    api_key = os.getenv("OPENAI_API_KEY")
+    api_key = os.getenv("HF_TOKEN")
     if not api_key:
-        raise RuntimeError("OPENAI_API_KEY is not set")
-    return OpenAI(api_key=api_key)
+        raise RuntimeError("HF_TOKEN is not set")
+    return OpenAI(
+        base_url=os.getenv("HF_BASE_URL", HF_BASE_URL),
+        api_key=api_key,
+    )
 
 
 def generate_reply(
@@ -49,7 +55,7 @@ def generate_reply(
     crisis_label: str,
 ) -> str:
     client = get_client()
-    model = os.getenv("ANUPAMA_OPENAI_MODEL", "gpt-5")
+    model = os.getenv("ANUPAMA_HF_MODEL", "Qwen/Qwen2.5-7B-Instruct-1M")
 
     developer_prompt = (
         f"{BASE_INSTRUCTIONS}\n\n"
@@ -60,35 +66,21 @@ def generate_reply(
         f"- distortion: {distortion}\n"
     )
 
-    input_items = [
-        {
-            "role": "developer",
-            "content": [{"type": "input_text", "text": developer_prompt}],
-        }
-    ]
+    messages = [{"role": "system", "content": developer_prompt}]
 
     for turn in history[-6:]:
-        input_items.append(
-            {
-                "role": turn["role"],
-                "content": [{"type": "input_text", "text": turn["content"]}],
-            }
-        )
+        messages.append({"role": turn["role"], "content": turn["content"]})
 
-    input_items.append(
-        {
-            "role": "user",
-            "content": [{"type": "input_text", "text": message}],
-        }
-    )
+    messages.append({"role": "user", "content": message})
 
-    response = client.responses.create(
+    response = client.chat.completions.create(
         model=model,
-        input=input_items,
-        max_output_tokens=220,
+        messages=messages,
+        max_tokens=220,
+        temperature=0.7,
     )
 
-    text = (response.output_text or "").strip()
+    text = (response.choices[0].message.content or "").strip()
     if not text:
-        raise RuntimeError("OpenAI response was empty")
+        raise RuntimeError("Hugging Face response was empty")
     return text
