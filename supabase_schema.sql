@@ -5,6 +5,10 @@ create table if not exists profiles (
   timezone text not null,
   goals jsonb default '[]'::jsonb,
   preferred_mode text not null,
+  date_of_birth date,
+  gender text not null default 'prefer_not_to_say',
+  sexual_orientation text not null default 'prefer_not_to_say',
+  location text,
   created_at timestamptz not null,
   updated_at timestamptz not null
 );

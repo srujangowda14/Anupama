@@ -32,7 +32,20 @@ def _single(table: str, filters: dict[str, Any]) -> dict[str, Any] | None:
     return data[0] if data else None
 
 
-def upsert_profile(*, profile_id: str | None, name: str, email: str | None, timezone: str, goals: list[str], preferred_mode: str, now: str) -> dict[str, Any]:
+def upsert_profile(
+    *,
+    profile_id: str | None,
+    name: str,
+    email: str | None,
+    timezone: str,
+    goals: list[str],
+    preferred_mode: str,
+    date_of_birth: str | None,
+    gender: str,
+    sexual_orientation: str,
+    location: str | None,
+    now: str,
+) -> dict[str, Any]:
     payload = {
         "id": profile_id or str(uuid4()),
         "name": name,
@@ -40,6 +53,10 @@ def upsert_profile(*, profile_id: str | None, name: str, email: str | None, time
         "timezone": timezone,
         "goals": goals,
         "preferred_mode": preferred_mode,
+        "date_of_birth": date_of_birth,
+        "gender": gender,
+        "sexual_orientation": sexual_orientation,
+        "location": location,
         "updated_at": now,
     }
     existing = get_profile(payload["id"])
@@ -205,3 +222,12 @@ def list_upcoming_schedules(profile_id: str) -> list[dict[str, Any]]:
         .execute()
         .data
     )
+
+
+def delete_profile_data(profile_id: str) -> None:
+    client = get_client()
+    client.table("schedules").delete().eq("profile_id", profile_id).execute()
+    client.table("homework").delete().eq("profile_id", profile_id).execute()
+    client.table("mood_logs").delete().eq("profile_id", profile_id).execute()
+    client.table("sessions").delete().eq("profile_id", profile_id).execute()
+    client.table("profiles").delete().eq("id", profile_id).execute()
