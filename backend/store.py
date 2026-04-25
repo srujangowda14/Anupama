@@ -132,6 +132,18 @@ def list_recent_sessions(profile_id: str, limit: int = 5) -> list[dict[str, Any]
     )
 
 
+def list_all_sessions(profile_id: str) -> list[dict[str, Any]]:
+    return (
+        get_client()
+        .table("sessions")
+        .select("*")
+        .eq("profile_id", profile_id)
+        .order("created_at", desc=True)
+        .execute()
+        .data
+    )
+
+
 def log_mood(*, session_id: str, profile_id: str, score: int, note: str | None, timestamp: str) -> dict[str, Any]:
     payload = {
         "id": str(uuid4()),
@@ -183,6 +195,22 @@ def list_pending_homework(profile_id: str) -> list[dict[str, Any]]:
         .execute()
         .data
     )
+
+
+def list_all_homework(profile_id: str) -> list[dict[str, Any]]:
+    return (
+        get_client()
+        .table("homework")
+        .select("*")
+        .eq("profile_id", profile_id)
+        .order("created_at", desc=True)
+        .execute()
+        .data
+    )
+
+
+def get_homework(homework_id: str) -> dict[str, Any] | None:
+    return _single("homework", {"id": homework_id})
 
 
 def update_homework(homework_id: str, *, status: str, reflection: str | None, now: str) -> dict[str, Any] | None:
