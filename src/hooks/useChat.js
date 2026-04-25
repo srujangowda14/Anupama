@@ -6,6 +6,8 @@ export function useChat(mode) {
   const [sessionId, setSessionId] = useState(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState(null);
+  const [homework, setHomework] = useState(null);
+  const [previousSummary, setPreviousSummary] = useState(null);
   const addMessage = useCallback((msg) => {
     setMessages((prev) => [...prev, { id: Date.now() + Math.random(), ...msg }]);
   }, []);
@@ -27,6 +29,8 @@ export function useChat(mode) {
         const data = await api.chat(sessionId, text, mode);
 
         if (!sessionId) setSessionId(data.session_id);
+        if (data.homework) setHomework(data.homework);
+        if (data.previous_session_summary) setPreviousSummary(data.previous_session_summary);
 
         addMessage({
           role: "assistant",
@@ -36,6 +40,7 @@ export function useChat(mode) {
           mood_score: data.mood_score,
           distortion: data.distortion,
           session_id: data.session_id,
+          homework: data.homework,
         });
 
         // Auto-log mood detected by classifier
@@ -62,10 +67,12 @@ export function useChat(mode) {
 
   const reset = useCallback(() => {
     if (sessionId) api.deleteSession(sessionId).catch(() => {});
-    setMessages([]);
-    setSessionId(null);
-    setError(null);
-  }, [sessionId]);
+      setMessages([]);
+      setSessionId(null);
+      setError(null);
+      setHomework(null);
+      setPreviousSummary(null);
+    }, [sessionId]);
 
-  return { messages, sessionId, loading, error, send, reset };
+  return { messages, sessionId, loading, error, send, reset, homework, previousSummary };
 }
