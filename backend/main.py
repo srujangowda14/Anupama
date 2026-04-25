@@ -10,7 +10,13 @@ from fastapi import FastAPI, Header, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel, Field
 
-from backend.care import build_google_calendar_url, next_checkin_due, suggest_cbt_homework, summarize_session
+from backend.care import (
+    build_google_calendar_url,
+    build_treatment_plan,
+    next_checkin_due,
+    suggest_cbt_homework,
+    summarize_session,
+)
 from backend import store
 from model.engine import Anupama
 from backend.openai_responder import generate_reply
@@ -126,16 +132,110 @@ SESSION_END_PATTERNS = [
     r"\bi have to go\b",
 ]
 
+SESSION_WRAP_READINESS_PATTERNS = [
+    r"\bthat helps\b",
+    r"\bthat makes sense\b",
+    r"\bi can try that\b",
+    r"\bi'll try that\b",
+    r"\bthat's useful\b",
+    r"\bthis gives me something to work on\b",
+]
+
 
 def has_pattern(text: str, patterns: list[str]) -> bool:
     lowered = text.lower()
     return any(re.search(pattern, lowered) for pattern in patterns)
 
 
-def should_close_session(mode: str, history: list[dict], message: str) -> bool:
+def get_turn_role(item: dict | ChatTurn) -> str:
+    return item["role"] if isinstance(item, dict) else item.role
+
+
+def count_user_turns(history: list[dict | ChatTurn]) -> int:
+    return sum(1 for item in history if get_turn_role(item) == "user")
+
+
+def detect_session_phase(
+    mode: str,
+    history: list[dict | ChatTurn],
+    *,
+    is_first_session: bool,
+    message: str,
+) -> str:
     explicit_wrap = has_pattern(message, SESSION_END_PATTERNS)
-    user_turns = sum(1 for item in history if item["role"] == "user") + 1
-    return explicit_wrap or (mode == "cbt" and user_turns >= 6)
+    user_turns = count_user_turns(history)
+    if explicit_wrap:
+        return "closing"
+    if is_first_session:
+        if user_turns <= 2:
+            return "opening"
+        if user_turns <= 5:
+            return "working"
+        return "closing"
+    if mode == "cbt":
+        if user_turns <= 2:
+            return "opening"
+        if user_turns <= 5:
+            return "working"
+        return "closing"
+    if user_turns <= 2:
+        return "opening"
+    return "working"
+
+
+def should_close_session(
+    mode: str,
+    history: list[dict | ChatTurn],
+    message: str,
+    *,
+    is_first_session: bool,
+) -> bool:
+    explicit_wrap = has_pattern(message, SESSION_END_PATTERNS)
+    if explicit_wrap:
+        return True
+    user_turns = count_user_turns(history)
+    ready_for_wrap = has_pattern(message, SESSION_WRAP_READINESS_PATTERNS)
+    if is_first_session:
+        return user_turns >= 6
+    if mode == "cbt":
+        return user_turns >= 6 or (user_turns >= 4 and ready_for_wrap)
+    return False
+
+
+def build_memory_context(
+    *,
+    sessions: list[dict],
+    current_session_id: str,
+    pending_homework: list[dict],
+) -> str | None:
+    prior_sessions = [item for item in sessions if item["id"] != current_session_id and item.get("summary")]
+    if not prior_sessions and not pending_homework:
+        return None
+
+    sections: list[str] = []
+    if prior_sessions:
+        earliest = prior_sessions[-1]
+        latest = prior_sessions[0]
+        sections.append(f"Initial understanding of the person:\n{earliest['summary']}")
+        if latest["id"] != earliest["id"]:
+            sections.append(f"Most recent prior session:\n{latest['summary']}")
+    if pending_homework:
+        homework_titles = ", ".join(item["title"] for item in pending_homework[:3])
+        sections.append(f"Open homework to review: {homework_titles}")
+    return "\n\n".join(sections)
+
+
+def get_auth_user(authorization: str | None):
+    if not authorization or not authorization.lower().startswith("bearer "):
+        raise HTTPException(status_code=401, detail="Authentication required")
+    token = authorization.split(" ", 1)[1]
+    try:
+        user = store.get_client().auth.get_user(token).user
+    except Exception as exc:
+        raise HTTPException(status_code=401, detail=f"Invalid auth token: {exc}") from exc
+    if not user:
+        raise HTTPException(status_code=401, detail="Invalid auth token")
+    return user
 
 
 def build_summary(session: SessionState) -> str:
@@ -183,16 +283,25 @@ def get_allowed_origins() -> list[str]:
 
 
 def get_user_id_from_auth(authorization: str | None) -> str:
-    if not authorization or not authorization.lower().startswith("bearer "):
-        raise HTTPException(status_code=401, detail="Authentication required")
-    token = authorization.split(" ", 1)[1]
-    try:
-        user = store.get_client().auth.get_user(token).user
-    except Exception as exc:
-        raise HTTPException(status_code=401, detail=f"Invalid auth token: {exc}") from exc
-    if not user:
-        raise HTTPException(status_code=401, detail="Invalid auth token")
-    return user.id
+    return get_auth_user(authorization).id
+
+
+def require_owned_session(session_id: str, authorization: str | None) -> dict:
+    session = store.get_session(session_id)
+    if session is None:
+        raise HTTPException(status_code=404, detail="Session not found")
+    if session["profile_id"] != get_user_id_from_auth(authorization):
+        raise HTTPException(status_code=403, detail="Forbidden")
+    return session
+
+
+def require_owned_homework(homework_id: str, authorization: str | None) -> dict:
+    item = store.get_homework(homework_id)
+    if item is None:
+        raise HTTPException(status_code=404, detail="Homework not found")
+    if item["profile_id"] != get_user_id_from_auth(authorization):
+        raise HTTPException(status_code=403, detail="Forbidden")
+    return item
 
 
 @lru_cache(maxsize=1)
@@ -258,11 +367,12 @@ def health():
 
 @app.post("/profiles")
 def upsert_profile(payload: ProfileRequest, authorization: str | None = Header(default=None)):
-    user_id = get_user_id_from_auth(authorization)
+    auth_user = get_auth_user(authorization)
+    user_id = auth_user.id
     profile = store.upsert_profile(
         profile_id=user_id,
         name=payload.name.strip(),
-        email=payload.email,
+        email=payload.email or auth_user.email,
         timezone=payload.timezone,
         goals=payload.goals,
         preferred_mode=payload.preferred_mode,
@@ -292,15 +402,37 @@ def dashboard(profile_id: str, authorization: str | None = Header(default=None))
     profile = store.get_profile(profile_id)
     if not profile:
         raise HTTPException(status_code=404, detail="Profile not found")
-    recent_sessions = store.list_recent_sessions(profile_id)
+    recent_sessions = store.list_all_sessions(profile_id)
     upcoming_sessions = store.list_upcoming_schedules(profile_id)
     pending_homework = store.list_pending_homework(profile_id)
+    all_homework = store.list_all_homework(profile_id)
+    treatment_plan = build_treatment_plan(
+        goals=profile.get("goals", []) or [],
+        session_count=len(recent_sessions),
+        pending_homework_count=len(pending_homework),
+    )
     return {
         "profile": profile,
         "recent_sessions": recent_sessions,
         "upcoming_sessions": upcoming_sessions,
         "pending_homework": pending_homework,
+        "all_homework": all_homework,
+        "treatment_plan": treatment_plan,
     }
+
+
+@app.get("/profiles/{profile_id}/sessions")
+def list_sessions(profile_id: str, authorization: str | None = Header(default=None)):
+    if profile_id != get_user_id_from_auth(authorization):
+        raise HTTPException(status_code=403, detail="Forbidden")
+    return {"sessions": store.list_all_sessions(profile_id)}
+
+
+@app.get("/profiles/{profile_id}/homework")
+def list_homework(profile_id: str, authorization: str | None = Header(default=None)):
+    if profile_id != get_user_id_from_auth(authorization):
+        raise HTTPException(status_code=403, detail="Forbidden")
+    return {"homework": store.list_all_homework(profile_id)}
 
 
 @app.post("/profiles/{profile_id}/schedule")
@@ -337,7 +469,8 @@ def list_schedule(profile_id: str, authorization: str | None = Header(default=No
 
 
 @app.post("/homework/{homework_id}")
-def update_homework(homework_id: str, payload: HomeworkUpdateRequest):
+def update_homework(homework_id: str, payload: HomeworkUpdateRequest, authorization: str | None = Header(default=None)):
+    require_owned_homework(homework_id, authorization)
     item = store.update_homework(homework_id, status=payload.status, reflection=payload.reflection, now=utc_now())
     if not item:
         raise HTTPException(status_code=404, detail="Homework not found")
@@ -395,13 +528,31 @@ def chat(payload: ChatRequest, authorization: str | None = Header(default=None))
     violence_disclosure = has_pattern(payload.message, VIOLENCE_PATTERNS)
     is_crisis = classification.crisis_label == "crisis" and explicit_self_harm
     conditioning_tokens = engine._build_cond_tokens(classification, payload.mode) if not is_crisis else []
-    recent_sessions = store.list_recent_sessions(user_id, limit=2)
-    previous_summary = next(
-        (item["summary"] for item in recent_sessions if item["id"] != session_id and item.get("summary")),
-        None,
-    )
+    all_sessions = store.list_all_sessions(user_id)
     pending_homework = store.list_pending_homework(user_id)
-    closing = should_close_session(payload.mode, session.history[:-1], payload.message.strip())
+    is_first_session = len(all_sessions) <= 1
+    memory_context = build_memory_context(
+        sessions=all_sessions,
+        current_session_id=session_id,
+        pending_homework=pending_homework,
+    )
+    treatment_plan = build_treatment_plan(
+        goals=profile.get("goals", []) or [],
+        session_count=len(all_sessions),
+        pending_homework_count=len(pending_homework),
+    )
+    session_phase = detect_session_phase(
+        payload.mode,
+        session.history,
+        is_first_session=is_first_session,
+        message=payload.message.strip(),
+    )
+    closing = should_close_session(
+        payload.mode,
+        session.history,
+        payload.message.strip(),
+        is_first_session=is_first_session,
+    )
 
     if is_crisis:
         reply_text = engine.CRISIS_PROTOCOL
@@ -414,9 +565,13 @@ def chat(payload: ChatRequest, authorization: str | None = Header(default=None))
                 mode=payload.mode,
                 history=[turn.model_dump() for turn in session.history[:-1]],
                 profile=profile,
-                memory_context=previous_summary,
+                memory_context=memory_context,
                 pending_homework=pending_homework,
                 should_close_session=closing,
+                is_first_session=is_first_session,
+                session_phase=session_phase,
+                treatment_phase=treatment_plan["phase"],
+                treatment_guidance=treatment_plan["guidance"],
                 mood_score=classification.mood_score,
                 distortion=classification.distortion,
                 crisis_label=classification.crisis_label,
@@ -445,7 +600,7 @@ def chat(payload: ChatRequest, authorization: str | None = Header(default=None))
     )
 
     homework_item = None
-    if payload.mode == "cbt" and not is_crisis and closing:
+    if payload.mode == "cbt" and not is_crisis and closing and not is_first_session:
         title, instructions = suggest_cbt_homework(classification.distortion)
         homework_item = store.create_homework(
             profile_id=user_id,
@@ -480,17 +635,18 @@ def chat(payload: ChatRequest, authorization: str | None = Header(default=None))
         "crisis_label": classification.crisis_label,
         "conditioning_tokens": conditioning_tokens,
         "homework": homework_item,
-        "previous_session_summary": previous_summary,
+        "previous_session_summary": memory_context,
         "pending_homework": pending_homework,
+        "session_phase": session_phase,
         "session_closing": closing,
+        "is_first_session": is_first_session,
+        "treatment_plan": treatment_plan,
     }
 
 
 @app.post("/mood/{session_id}")
 def log_mood(session_id: str, payload: MoodLogRequest, authorization: str | None = Header(default=None)):
-    session = store.get_session(session_id)
-    if session is None:
-        raise HTTPException(status_code=404, detail="Session not found")
+    require_owned_session(session_id, authorization)
     user_id = get_user_id_from_auth(authorization)
 
     entry = store.log_mood(
@@ -500,22 +656,18 @@ def log_mood(session_id: str, payload: MoodLogRequest, authorization: str | None
         note=payload.note,
         timestamp=utc_now(),
     )
-    return {"session_id": session_id, "mood_log": get_session_mood(session_id)["mood_log"], "entry": entry}
+    return {"session_id": session_id, "mood_log": store.get_session_mood(session_id), "entry": entry}
 
 
 @app.get("/mood/{session_id}")
-def get_mood(session_id: str):
-    session = store.get_session(session_id)
-    if session is None:
-        raise HTTPException(status_code=404, detail="Session not found")
+def get_mood(session_id: str, authorization: str | None = Header(default=None)):
+    require_owned_session(session_id, authorization)
     return {"session_id": session_id, "mood_log": store.get_session_mood(session_id)}
 
 
 @app.get("/summary/{session_id}")
-def get_summary(session_id: str):
-    session = store.get_session(session_id)
-    if session is None:
-        raise HTTPException(status_code=404, detail="Session not found")
+def get_summary(session_id: str, authorization: str | None = Header(default=None)):
+    session = require_owned_session(session_id, authorization)
     summary = session.get("summary")
     if not summary:
         messages = store.list_session_messages(session_id)
@@ -533,7 +685,8 @@ def get_summary(session_id: str):
 
 
 @app.delete("/session/{session_id}")
-def delete_session(session_id: str):
+def delete_session(session_id: str, authorization: str | None = Header(default=None)):
+    require_owned_session(session_id, authorization)
     SESSIONS.pop(session_id, None)
     return {"deleted": True, "session_id": session_id}
 
