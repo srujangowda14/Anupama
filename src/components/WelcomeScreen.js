@@ -24,8 +24,26 @@ const MODES = [
   },
 ];
 
-export default function WelcomeScreen({ onStart }) {
+export default function WelcomeScreen({ onStart, profile }) {
   const [selected, setSelected] = useState("support");
+  const [name, setName] = useState(profile?.name || "");
+  const [email, setEmail] = useState(profile?.email || "");
+  const [goals, setGoals] = useState((profile?.goals || []).join(", "));
+  const [starting, setStarting] = useState(false);
+
+  const handleStart = async () => {
+    setStarting(true);
+    try {
+      await onStart(selected, {
+        name: name.trim() || "Anupama user",
+        email: email.trim() || null,
+        timezone: Intl.DateTimeFormat().resolvedOptions().timeZone,
+        goals: goals.split(",").map((goal) => goal.trim()).filter(Boolean),
+      });
+    } finally {
+      setStarting(false);
+    }
+  };
 
   return (
     <div style={styles.root}>
@@ -51,6 +69,13 @@ export default function WelcomeScreen({ onStart }) {
             This is a research project, not a licensed clinical tool. In a crisis, call{" "}
             <strong style={{ color: "#C8944A" }}>988</strong>.
           </span>
+        </div>
+
+        <p style={styles.pickLabel}>Create your profile</p>
+        <div style={styles.profileForm}>
+          <input style={styles.input} value={name} onChange={(e) => setName(e.target.value)} placeholder="Your name" />
+          <input style={styles.input} value={email} onChange={(e) => setEmail(e.target.value)} placeholder="Email (optional)" />
+          <textarea style={{ ...styles.input, minHeight: 64, resize: "vertical" }} value={goals} onChange={(e) => setGoals(e.target.value)} placeholder="Goals for therapy, separated by commas" />
         </div>
 
         {/* Mode picker */}
@@ -84,8 +109,9 @@ export default function WelcomeScreen({ onStart }) {
         </div>
 
         <button
-          onClick={() => onStart(selected)}
+          onClick={handleStart}
           style={styles.startBtn}
+          disabled={starting}
           onMouseEnter={(e) => {
             e.currentTarget.style.transform = "translateY(-2px)";
             e.currentTarget.style.boxShadow = "0 8px 32px rgba(107,158,122,0.35)";
@@ -95,11 +121,11 @@ export default function WelcomeScreen({ onStart }) {
             e.currentTarget.style.boxShadow = "0 4px 20px rgba(107,158,122,0.2)";
           }}
         >
-          Begin Session →
+          {starting ? "Saving Profile..." : "Begin Session →"}
         </button>
 
         <p style={styles.footer}>
-          Sessions are ephemeral · No data stored permanently
+          Profiles, session memory, homework, and schedules stay linked across visits
         </p>
       </div>
     </div>
@@ -196,6 +222,20 @@ const styles = {
     color: "var(--text-muted)",
     alignSelf: "flex-start",
     marginBottom: 10,
+  },
+  profileForm: {
+    width: "100%",
+    marginBottom: 12,
+  },
+  input: {
+    width: "100%",
+    marginBottom: 10,
+    padding: "12px 14px",
+    borderRadius: "var(--radius-md)",
+    border: "1px solid rgba(255,255,255,0.08)",
+    background: "rgba(255,255,255,0.03)",
+    color: "var(--text-primary)",
+    fontSize: 14,
   },
   modeGrid: {
     display: "flex",
