@@ -3,7 +3,7 @@ import { useChat } from "../hooks/useChat";
 import ChatMessage from "./ChatMessage";
 import ChatInput from "./ChatInput";
 import MoodPanel from "./MoodPanel";
-import { CopingPanel, SummaryPanel } from "./SidebarPanels";
+import { CarePlanPanel, ProfilePanel, SummaryPanel } from "./SidebarPanels";
 
 const MODE_META = {
   support: { icon: "🌿", label: "Support Buddy",     color: "#6B9E7A" },
@@ -11,7 +11,7 @@ const MODE_META = {
   intake:  { icon: "📋", label: "Intake Assistant",  color: "#C8944A" },
 };
 
-const TABS = ["mood", "coping", "summary"];
+const TABS = ["profile", "mood", "plan", "summary"];
 
 const OPENING_MESSAGES = {
   support: "Hello, I'm Anupama. This is a safe space — no judgment here.\n\nHow are you feeling today?",
@@ -19,9 +19,9 @@ const OPENING_MESSAGES = {
   intake:  "Hello. I'm here to help you organize your thoughts before speaking with a therapist.\n\nTake your time — what's the main thing you'd like to talk about?",
 };
 
-export default function ChatScreen({ mode, onNewSession }) {
-  const { messages, sessionId, loading, send } = useChat(mode);
-  const [tab, setTab] = useState("mood");
+export default function ChatScreen({ mode, onNewSession, profile, onProfileUpdate }) {
+  const { messages, sessionId, loading, send, homework, previousSummary } = useChat(mode);
+  const [tab, setTab] = useState("profile");
   const [hasOpened, setHasOpened] = useState(false);
   const bottomRef = useRef(null);
   const meta = MODE_META[mode];
@@ -88,8 +88,9 @@ export default function ChatScreen({ mode, onNewSession }) {
 
         {/* Panel content */}
         <div style={styles.panelContent}>
+          {tab === "profile" && <ProfilePanel profile={profile} onProfileUpdate={onProfileUpdate} />}
           {tab === "mood"    && <MoodPanel sessionId={sessionId} />}
-          {tab === "coping"  && <CopingPanel />}
+          {tab === "plan"    && <CarePlanPanel profileId={profile?.id || localStorage.getItem("anupama_profile_id")} latestHomework={homework} previousSummary={previousSummary} />}
           {tab === "summary" && <SummaryPanel sessionId={sessionId} />}
         </div>
 

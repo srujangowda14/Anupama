@@ -137,6 +137,12 @@ export default function ChatMessage({ msg }) {
           </div>
         )}
 
+        {!isUser && msg.homework && (
+          <div style={{ marginTop: 8, padding: "8px 10px", borderRadius: 8, background: "rgba(123,127,212,0.12)", border: "1px solid rgba(123,127,212,0.2)", fontSize: 12, color: "var(--text-secondary)" }}>
+            <strong style={{ color: "#B8BBF0" }}>Homework:</strong> {msg.homework.title}
+          </div>
+        )}
+
         {/* Timestamp */}
         <div
           style={{
