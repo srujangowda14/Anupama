@@ -126,6 +126,133 @@ export function SummaryPanel({ sessionId }) {
   );
 }
 
+export function ProfilePanel({ profile, onProfileUpdate }) {
+  const [name, setName] = useState(profile?.name || "");
+  const [email, setEmail] = useState(profile?.email || "");
+  const [goals, setGoals] = useState((profile?.goals || []).join(", "));
+  const [saved, setSaved] = useState(false);
+
+  const save = async () => {
+    const data = await api.saveProfile({
+      id: profile?.id || localStorage.getItem("anupama_profile_id"),
+      name: name.trim() || "Anupama user",
+      email: email.trim() || null,
+      timezone: profile?.timezone || Intl.DateTimeFormat().resolvedOptions().timeZone,
+      goals: goals.split(",").map((goal) => goal.trim()).filter(Boolean),
+      preferred_mode: profile?.preferred_mode || "support",
+    });
+    localStorage.setItem("anupama_profile_id", data.profile.id);
+    onProfileUpdate(data.profile);
+    setSaved(true);
+    setTimeout(() => setSaved(false), 1500);
+  };
+
+  return (
+    <div>
+      <p style={styles.sectionLabel}>Your profile</p>
+      <input style={styles.input} value={name} onChange={(e) => setName(e.target.value)} placeholder="Name" />
+      <input style={styles.input} value={email} onChange={(e) => setEmail(e.target.value)} placeholder="Email" />
+      <textarea style={{ ...styles.input, minHeight: 68, resize: "vertical" }} value={goals} onChange={(e) => setGoals(e.target.value)} placeholder="Goals, separated by commas" />
+      <button onClick={save} style={styles.generateBtn}>Save Profile</button>
+      {saved && <p style={{ fontSize: 12, color: "#6B9E7A", marginTop: 8 }}>Saved</p>}
+    </div>
+  );
+}
+
+export function CarePlanPanel({ profileId, latestHomework, previousSummary }) {
+  const [dashboard, setDashboard] = useState(null);
+  const [loading, setLoading] = useState(false);
+  const [title, setTitle] = useState("Follow-up Anupama session");
+  const [date, setDate] = useState("");
+  const [time, setTime] = useState("");
+
+  const refresh = async () => {
+    if (!profileId) return;
+    setLoading(true);
+    try {
+      const data = await api.getDashboard(profileId);
+      setDashboard(data);
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const schedule = async () => {
+    if (!profileId || !date || !time) return;
+    const startAt = new Date(`${date}T${time}`).toISOString();
+    const endAt = new Date(new Date(startAt).getTime() + 30 * 60 * 1000).toISOString();
+    await api.scheduleSession(profileId, {
+      title,
+      description: "Follow-up session created from Anupama",
+      start_at: startAt,
+      end_at: endAt,
+      timezone: Intl.DateTimeFormat().resolvedOptions().timeZone,
+    });
+    refresh();
+  };
+
+  const completeHomework = async (item) => {
+    await api.updateHomework(item.id, { status: "completed", reflection: "Completed in app" });
+    refresh();
+  };
+
+  return (
+    <div>
+      <p style={styles.sectionLabel}>Continuity plan</p>
+      <button onClick={refresh} style={styles.generateBtn}>{loading ? "Refreshing..." : "Refresh Memory"}</button>
+
+      {previousSummary && (
+        <div style={styles.summaryBox}>
+          <p style={styles.helperLabel}>Previous session context</p>
+          <pre style={styles.summaryText}>{previousSummary}</pre>
+        </div>
+      )}
+
+      {latestHomework && (
+        <div style={styles.exerciseCard}>
+          <div style={styles.exerciseHeader}>
+            <span style={{ fontSize: 16 }}>📝</span>
+            <span style={{ fontSize: 13, color: "var(--text-primary)", flex: 1, textAlign: "left" }}>{latestHomework.title}</span>
+          </div>
+          <div style={{ padding: "0 12px 12px", fontSize: 12, color: "var(--text-secondary)", lineHeight: 1.5 }}>
+            {latestHomework.instructions}
+          </div>
+        </div>
+      )}
+
+      {dashboard?.pending_homework?.length > 0 && (
+        <>
+          <p style={{ ...styles.sectionLabel, marginTop: 14 }}>Open homework</p>
+          {dashboard.pending_homework.slice(0, 3).map((item) => (
+            <div key={item.id} style={styles.logRow}>
+              <span style={{ fontSize: 12, color: "var(--text-secondary)" }}>{item.title}</span>
+              <button onClick={() => completeHomework(item)} style={styles.inlineBtn}>Done</button>
+            </div>
+          ))}
+        </>
+      )}
+
+      <p style={{ ...styles.sectionLabel, marginTop: 14 }}>Schedule your next session</p>
+      <input style={styles.input} value={title} onChange={(e) => setTitle(e.target.value)} placeholder="Session title" />
+      <input style={styles.input} type="date" value={date} onChange={(e) => setDate(e.target.value)} />
+      <input style={styles.input} type="time" value={time} onChange={(e) => setTime(e.target.value)} />
+      <button onClick={schedule} style={styles.generateBtn}>Create Calendar Event</button>
+
+      {dashboard?.upcoming_sessions?.length > 0 && (
+        <>
+          <p style={{ ...styles.sectionLabel, marginTop: 14 }}>Upcoming sessions</p>
+          {dashboard.upcoming_sessions.slice(0, 3).map((item) => (
+            <a key={item.id} href={item.calendar_url} target="_blank" rel="noreferrer" style={styles.logRow}>
+              <span style={{ fontSize: 12, color: "var(--text-secondary)" }}>{item.title}</span>
+              <span style={{ marginLeft: "auto", fontSize: 11, color: "#6B9E7A" }}>Open</span>
+            </a>
+          ))}
+        </>
+      )}
+    </div>
+  );
+}
+
 // ─── Styles ──────────────────────────────────────────────────────────────────
 
 const styles = {
@@ -205,5 +332,37 @@ const styles = {
     cursor: "pointer",
     padding: 0,
     textDecoration: "underline",
+  },
+  input: {
+    width: "100%",
+    marginBottom: 8,
+    padding: "9px 10px",
+    borderRadius: "var(--radius-sm)",
+    border: "1px solid var(--border-subtle)",
+    background: "rgba(255,255,255,0.03)",
+    color: "var(--text-primary)",
+    fontSize: 12,
+  },
+  helperLabel: {
+    fontSize: 11,
+    color: "var(--text-muted)",
+    marginBottom: 6,
+  },
+  logRow: {
+    display: "flex",
+    alignItems: "center",
+    gap: 8,
+    padding: "8px 10px",
+    background: "rgba(255,255,255,0.02)",
+    borderRadius: "var(--radius-sm)",
+    border: "1px solid var(--border-subtle)",
+    marginBottom: 6,
+  },
+  inlineBtn: {
+    marginLeft: "auto",
+    background: "none",
+    border: "none",
+    color: "#6B9E7A",
+    fontSize: 11,
   },
 };
