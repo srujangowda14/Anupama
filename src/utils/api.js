@@ -13,18 +13,42 @@ export const api = {
   chat: (sessionId, message, mode) =>
     request("/chat", {
       method: "POST",
-      body: JSON.stringify({ session_id: sessionId, message, mode }),
+      body: JSON.stringify({ session_id: sessionId, user_id: localStorage.getItem("anupama_profile_id"), message, mode }),
     }),
 
   logMood: (sessionId, score, note = null) =>
     request(`/mood/${sessionId}`, {
       method: "POST",
-      body: JSON.stringify({ score, note }),
+      body: JSON.stringify({ user_id: localStorage.getItem("anupama_profile_id"), score, note }),
     }),
 
   getMood: (sessionId) => request(`/mood/${sessionId}`),
 
   getSummary: (sessionId) => request(`/summary/${sessionId}`),
+
+  saveProfile: (profile) =>
+    request("/profiles", {
+      method: "POST",
+      body: JSON.stringify(profile),
+    }),
+
+  getProfile: (profileId) => request(`/profiles/${profileId}`),
+
+  getDashboard: (profileId) => request(`/profiles/${profileId}/dashboard`),
+
+  scheduleSession: (profileId, payload) =>
+    request(`/profiles/${profileId}/schedule`, {
+      method: "POST",
+      body: JSON.stringify({ ...payload, profile_id: profileId }),
+    }),
+
+  getSchedule: (profileId) => request(`/profiles/${profileId}/schedule`),
+
+  updateHomework: (homeworkId, payload) =>
+    request(`/homework/${homeworkId}`, {
+      method: "POST",
+      body: JSON.stringify(payload),
+    }),
 
   deleteSession: (sessionId) =>
     request(`/session/${sessionId}`, { method: "DELETE" }),
