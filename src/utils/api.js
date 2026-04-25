@@ -1,8 +1,14 @@
+import { supabase } from "./supabase";
 const BASE = process.env.REACT_APP_API_URL || "http://localhost:8000";
 
 async function request(path, options = {}) {
+  const { data } = await supabase.auth.getSession();
+  const token = data.session?.access_token;
   const res = await fetch(`${BASE}${path}`, {
-    headers: { "Content-Type": "application/json" },
+    headers: {
+      "Content-Type": "application/json",
+      ...(token ? { Authorization: `Bearer ${token}` } : {}),
+    },
     ...options,
   });
   if (!res.ok) throw new Error(`API error: ${res.status}`);
@@ -13,13 +19,13 @@ export const api = {
   chat: (sessionId, message, mode) =>
     request("/chat", {
       method: "POST",
-      body: JSON.stringify({ session_id: sessionId, user_id: localStorage.getItem("anupama_profile_id"), message, mode }),
+      body: JSON.stringify({ session_id: sessionId, message, mode }),
     }),
 
   logMood: (sessionId, score, note = null) =>
     request(`/mood/${sessionId}`, {
       method: "POST",
-      body: JSON.stringify({ user_id: localStorage.getItem("anupama_profile_id"), score, note }),
+      body: JSON.stringify({ score, note }),
     }),
 
   getMood: (sessionId) => request(`/mood/${sessionId}`),
@@ -48,6 +54,11 @@ export const api = {
     request(`/homework/${homeworkId}`, {
       method: "POST",
       body: JSON.stringify(payload),
+    }),
+
+  deleteAccount: () =>
+    request("/account", {
+      method: "DELETE",
     }),
 
   deleteSession: (sessionId) =>
