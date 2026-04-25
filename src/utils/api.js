@@ -42,6 +42,10 @@ export const api = {
 
   getDashboard: (profileId) => request(`/profiles/${profileId}/dashboard`),
 
+  getSessions: (profileId) => request(`/profiles/${profileId}/sessions`),
+
+  getHomework: (profileId) => request(`/profiles/${profileId}/homework`),
+
   scheduleSession: (profileId, payload) =>
     request(`/profiles/${profileId}/schedule`, {
       method: "POST",
