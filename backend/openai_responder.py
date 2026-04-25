@@ -59,6 +59,7 @@ def generate_reply(
     profile: dict | None,
     memory_context: str | None,
     pending_homework: list[dict],
+    should_close_session: bool,
     mood_score: int,
     distortion: str,
     crisis_label: str,
@@ -77,6 +78,7 @@ def generate_reply(
         f"- user_goals: {', '.join(profile.get('goals', [])) if profile else 'none'}\n"
         f"- previous_session_context: {memory_context or 'none'}\n"
         f"- pending_homework: {', '.join(item['title'] for item in pending_homework) if pending_homework else 'none'}\n"
+        f"- should_close_session: {should_close_session}\n"
         "If mode is CBT, prefer this response shape when it fits naturally:\n"
         "1. Brief validation and summary of the user's thought/emotion.\n"
         "2. Identify the likely automatic thought or thinking trap.\n"
@@ -87,6 +89,9 @@ def generate_reply(
         "any cognitive reframe.\n"
         "If there is pending homework from a previous session, briefly ask about it near the start "
         "before moving into new coaching.\n"
+        "When should_close_session is true, briefly summarize the key takeaway from this session, "
+        "transition into an action plan for between sessions, and end with a warm check-in about "
+        "the user's readiness for the next step.\n"
     )
 
     messages = [{"role": "system", "content": developer_prompt}]

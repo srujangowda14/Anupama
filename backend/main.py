@@ -6,7 +6,7 @@ from pathlib import Path
 from typing import Literal
 from uuid import uuid4
 
-from fastapi import FastAPI, HTTPException
+from fastapi import FastAPI, Header, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel, Field
 
@@ -21,14 +21,12 @@ DEFAULT_CHECKPOINT_DIR = ROOT_DIR / "checkpoints"
 
 
 class ChatRequest(BaseModel):
-    user_id: str | None = None
     session_id: str | None = None
     message: str = Field(..., min_length=1)
     mode: Literal["support", "cbt", "intake"] = "support"
 
 
 class MoodLogRequest(BaseModel):
-    user_id: str
     score: int = Field(..., ge=1, le=5)
     note: str | None = None
 
@@ -40,6 +38,19 @@ class ProfileRequest(BaseModel):
     timezone: str = "America/Los_Angeles"
     goals: list[str] = Field(default_factory=list)
     preferred_mode: Literal["support", "cbt", "intake"] = "support"
+    date_of_birth: str | None = None
+    gender: Literal["female", "male", "nonbinary", "questioning", "prefer_not_to_say"] = "prefer_not_to_say"
+    sexual_orientation: Literal[
+        "straight",
+        "gay",
+        "lesbian",
+        "bisexual",
+        "pansexual",
+        "asexual",
+        "questioning",
+        "prefer_not_to_say",
+    ] = "prefer_not_to_say"
+    location: str | None = None
 
 
 class HomeworkUpdateRequest(BaseModel):
@@ -105,10 +116,26 @@ VIOLENCE_SAFETY_RESPONSE = (
     "what happened and whether the person is still near you."
 )
 
+SESSION_END_PATTERNS = [
+    r"\bbye\b",
+    r"\bthat(?:'s| is) all\b",
+    r"\bthank you\b",
+    r"\bthanks\b",
+    r"\bsee you\b",
+    r"\bgoodnight\b",
+    r"\bi have to go\b",
+]
+
 
 def has_pattern(text: str, patterns: list[str]) -> bool:
     lowered = text.lower()
     return any(re.search(pattern, lowered) for pattern in patterns)
+
+
+def should_close_session(mode: str, history: list[dict], message: str) -> bool:
+    explicit_wrap = has_pattern(message, SESSION_END_PATTERNS)
+    user_turns = sum(1 for item in history if item["role"] == "user") + 1
+    return explicit_wrap or (mode == "cbt" and user_turns >= 6)
 
 
 def build_summary(session: SessionState) -> str:
@@ -153,6 +180,19 @@ def get_allowed_origins() -> list[str]:
     if raw.strip() == "*":
         return ["*"]
     return [origin.strip() for origin in raw.split(",") if origin.strip()]
+
+
+def get_user_id_from_auth(authorization: str | None) -> str:
+    if not authorization or not authorization.lower().startswith("bearer "):
+        raise HTTPException(status_code=401, detail="Authentication required")
+    token = authorization.split(" ", 1)[1]
+    try:
+        user = store.get_client().auth.get_user(token).user
+    except Exception as exc:
+        raise HTTPException(status_code=401, detail=f"Invalid auth token: {exc}") from exc
+    if not user:
+        raise HTTPException(status_code=401, detail="Invalid auth token")
+    return user.id
 
 
 @lru_cache(maxsize=1)
@@ -217,21 +257,28 @@ def health():
 
 
 @app.post("/profiles")
-def upsert_profile(payload: ProfileRequest):
+def upsert_profile(payload: ProfileRequest, authorization: str | None = Header(default=None)):
+    user_id = get_user_id_from_auth(authorization)
     profile = store.upsert_profile(
-        profile_id=payload.id,
+        profile_id=user_id,
         name=payload.name.strip(),
         email=payload.email,
         timezone=payload.timezone,
         goals=payload.goals,
         preferred_mode=payload.preferred_mode,
+        date_of_birth=payload.date_of_birth,
+        gender=payload.gender,
+        sexual_orientation=payload.sexual_orientation,
+        location=payload.location,
         now=utc_now(),
     )
     return {"profile": profile}
 
 
 @app.get("/profiles/{profile_id}")
-def get_profile(profile_id: str):
+def get_profile(profile_id: str, authorization: str | None = Header(default=None)):
+    if profile_id != get_user_id_from_auth(authorization):
+        raise HTTPException(status_code=403, detail="Forbidden")
     profile = store.get_profile(profile_id)
     if not profile:
         raise HTTPException(status_code=404, detail="Profile not found")
@@ -239,7 +286,9 @@ def get_profile(profile_id: str):
 
 
 @app.get("/profiles/{profile_id}/dashboard")
-def dashboard(profile_id: str):
+def dashboard(profile_id: str, authorization: str | None = Header(default=None)):
+    if profile_id != get_user_id_from_auth(authorization):
+        raise HTTPException(status_code=403, detail="Forbidden")
     profile = store.get_profile(profile_id)
     if not profile:
         raise HTTPException(status_code=404, detail="Profile not found")
@@ -255,7 +304,9 @@ def dashboard(profile_id: str):
 
 
 @app.post("/profiles/{profile_id}/schedule")
-def schedule_session(profile_id: str, payload: ScheduleRequest):
+def schedule_session(profile_id: str, payload: ScheduleRequest, authorization: str | None = Header(default=None)):
+    if profile_id != get_user_id_from_auth(authorization):
+        raise HTTPException(status_code=403, detail="Forbidden")
     profile = store.get_profile(profile_id)
     if not profile:
         raise HTTPException(status_code=404, detail="Profile not found")
@@ -279,7 +330,9 @@ def schedule_session(profile_id: str, payload: ScheduleRequest):
 
 
 @app.get("/profiles/{profile_id}/schedule")
-def list_schedule(profile_id: str):
+def list_schedule(profile_id: str, authorization: str | None = Header(default=None)):
+    if profile_id != get_user_id_from_auth(authorization):
+        raise HTTPException(status_code=403, detail="Forbidden")
     return {"items": store.list_upcoming_schedules(profile_id)}
 
 
@@ -292,16 +345,14 @@ def update_homework(homework_id: str, payload: HomeworkUpdateRequest):
 
 
 @app.post("/chat")
-def chat(payload: ChatRequest):
+def chat(payload: ChatRequest, authorization: str | None = Header(default=None)):
     try:
         engine = load_engine()
     except Exception as exc:
         raise HTTPException(status_code=500, detail=str(exc)) from exc
 
-    if not payload.user_id:
-        raise HTTPException(status_code=400, detail="user_id is required")
-
-    profile = store.get_profile(payload.user_id)
+    user_id = get_user_id_from_auth(authorization)
+    profile = store.get_profile(user_id)
     if not profile:
         raise HTTPException(status_code=404, detail="Profile not found")
 
@@ -313,7 +364,7 @@ def chat(payload: ChatRequest):
         session_id = session_data["id"]
     else:
         session_data = store.create_session(
-            profile_id=payload.user_id,
+            profile_id=user_id,
             mode=payload.mode,
             title=f"{payload.mode.title()} session",
             now=utc_now(),
@@ -344,12 +395,13 @@ def chat(payload: ChatRequest):
     violence_disclosure = has_pattern(payload.message, VIOLENCE_PATTERNS)
     is_crisis = classification.crisis_label == "crisis" and explicit_self_harm
     conditioning_tokens = engine._build_cond_tokens(classification, payload.mode) if not is_crisis else []
-    recent_sessions = store.list_recent_sessions(payload.user_id, limit=2)
+    recent_sessions = store.list_recent_sessions(user_id, limit=2)
     previous_summary = next(
         (item["summary"] for item in recent_sessions if item["id"] != session_id and item.get("summary")),
         None,
     )
-    pending_homework = store.list_pending_homework(payload.user_id)
+    pending_homework = store.list_pending_homework(user_id)
+    closing = should_close_session(payload.mode, session.history[:-1], payload.message.strip())
 
     if is_crisis:
         reply_text = engine.CRISIS_PROTOCOL
@@ -364,6 +416,7 @@ def chat(payload: ChatRequest):
                 profile=profile,
                 memory_context=previous_summary,
                 pending_homework=pending_homework,
+                should_close_session=closing,
                 mood_score=classification.mood_score,
                 distortion=classification.distortion,
                 crisis_label=classification.crisis_label,
@@ -392,10 +445,10 @@ def chat(payload: ChatRequest):
     )
 
     homework_item = None
-    if payload.mode == "cbt" and not is_crisis:
+    if payload.mode == "cbt" and not is_crisis and closing:
         title, instructions = suggest_cbt_homework(classification.distortion)
         homework_item = store.create_homework(
-            profile_id=payload.user_id,
+            profile_id=user_id,
             session_id=session_id,
             title=title,
             instructions=instructions,
@@ -416,7 +469,7 @@ def chat(payload: ChatRequest):
     )
 
     return {
-        "user_id": payload.user_id,
+        "user_id": user_id,
         "session_id": session_id,
         "reply": reply_text,
         "timestamp": assistant_turn.timestamp,
@@ -429,18 +482,20 @@ def chat(payload: ChatRequest):
         "homework": homework_item,
         "previous_session_summary": previous_summary,
         "pending_homework": pending_homework,
+        "session_closing": closing,
     }
 
 
 @app.post("/mood/{session_id}")
-def log_mood(session_id: str, payload: MoodLogRequest):
+def log_mood(session_id: str, payload: MoodLogRequest, authorization: str | None = Header(default=None)):
     session = store.get_session(session_id)
     if session is None:
         raise HTTPException(status_code=404, detail="Session not found")
+    user_id = get_user_id_from_auth(authorization)
 
     entry = store.log_mood(
         session_id=session_id,
-        profile_id=payload.user_id,
+        profile_id=user_id,
         score=payload.score,
         note=payload.note,
         timestamp=utc_now(),
@@ -481,3 +536,11 @@ def get_summary(session_id: str):
 def delete_session(session_id: str):
     SESSIONS.pop(session_id, None)
     return {"deleted": True, "session_id": session_id}
+
+
+@app.delete("/account")
+def delete_account(authorization: str | None = Header(default=None)):
+    user_id = get_user_id_from_auth(authorization)
+    store.delete_profile_data(user_id)
+    store.get_client().auth.admin.delete_user(user_id, should_soft_delete=True)
+    return {"deleted": True}
