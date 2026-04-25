@@ -1,4 +1,4 @@
-import React, { useState } from "react";
+import React, { useEffect, useState } from "react";
 
 const MODES = [
   {
@@ -24,10 +24,10 @@ const MODES = [
   },
 ];
 
-export default function WelcomeScreen({ onStart, profile }) {
+export default function WelcomeScreen({ onStart, profile, accountEmail }) {
   const [selected, setSelected] = useState("support");
   const [name, setName] = useState(profile?.name || "");
-  const [email, setEmail] = useState(profile?.email || "");
+  const [email, setEmail] = useState(profile?.email || accountEmail || "");
   const [goals, setGoals] = useState((profile?.goals || []).join(", "));
   const [dateOfBirth, setDateOfBirth] = useState(profile?.date_of_birth || "");
   const [gender, setGender] = useState(profile?.gender || "prefer_not_to_say");
@@ -35,12 +35,22 @@ export default function WelcomeScreen({ onStart, profile }) {
   const [location, setLocation] = useState(profile?.location || "");
   const [starting, setStarting] = useState(false);
 
+  useEffect(() => {
+    setName(profile?.name || "");
+    setEmail(profile?.email || accountEmail || "");
+    setGoals((profile?.goals || []).join(", "));
+    setDateOfBirth(profile?.date_of_birth || "");
+    setGender(profile?.gender || "prefer_not_to_say");
+    setSexualOrientation(profile?.sexual_orientation || "prefer_not_to_say");
+    setLocation(profile?.location || "");
+  }, [profile, accountEmail]);
+
   const handleStart = async () => {
     setStarting(true);
     try {
       await onStart(selected, {
         name: name.trim() || "Anupama user",
-        email: email.trim() || null,
+        email: (accountEmail || email).trim() || null,
         timezone: Intl.DateTimeFormat().resolvedOptions().timeZone,
         goals: goals.split(",").map((goal) => goal.trim()).filter(Boolean),
         date_of_birth: dateOfBirth || null,
@@ -82,7 +92,18 @@ export default function WelcomeScreen({ onStart, profile }) {
         <p style={styles.pickLabel}>Create your profile</p>
         <div style={styles.profileForm}>
           <input style={styles.input} value={name} onChange={(e) => setName(e.target.value)} placeholder="Your name" />
-          <input style={styles.input} value={email} onChange={(e) => setEmail(e.target.value)} placeholder="Email (optional)" />
+          <input
+            style={{ ...styles.input, opacity: accountEmail ? 0.72 : 1 }}
+            value={email}
+            onChange={(e) => setEmail(e.target.value)}
+            placeholder="Email"
+            readOnly={Boolean(accountEmail)}
+          />
+          {accountEmail && (
+            <p style={styles.helperText}>
+              This email is connected to your account and has been filled in automatically.
+            </p>
+          )}
           <input style={styles.input} type="date" value={dateOfBirth} onChange={(e) => setDateOfBirth(e.target.value)} />
           <select style={styles.input} value={gender} onChange={(e) => setGender(e.target.value)}>
             <option value="female">Female</option>
@@ -253,6 +274,13 @@ const styles = {
   profileForm: {
     width: "100%",
     marginBottom: 12,
+  },
+  helperText: {
+    fontSize: 11,
+    color: "var(--text-muted)",
+    marginTop: -4,
+    marginBottom: 10,
+    lineHeight: 1.5,
   },
   input: {
     width: "100%",

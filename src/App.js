@@ -1,55 +1,68 @@
-import React, { useState } from "react";
+import React, { useEffect, useState } from "react";
 import "./styles/globals.css";
 import WelcomeScreen from "./components/WelcomeScreen";
-import ChatScreen from "./components/ChatScreen";
-import { api } from "./utils/api";
 import AuthScreen from "./components/AuthScreen";
+import WorkspaceShell from "./components/WorkspaceShell";
+import { api } from "./utils/api";
 import { supabase } from "./utils/supabase";
 
 export default function App() {
-  const [screen, setScreen] = useState("welcome"); // "welcome" | "chat"
-  const [mode, setMode] = useState("support");
   const [profile, setProfile] = useState(null);
   const [session, setSession] = useState(null);
   const [loadingProfile, setLoadingProfile] = useState(true);
 
-  React.useEffect(() => {
-    supabase.auth.getSession().then(async ({ data }) => {
-      setSession(data.session);
-      if (data.session?.user?.id) {
-        try {
-          const result = await api.getProfile(data.session.user.id);
-          setProfile(result.profile);
-          setMode(result.profile.preferred_mode || "support");
-        } catch (_err) {
-          setProfile(null);
-        }
-      } else {
-        setProfile(null);
-      }
-      setLoadingProfile(false);
-    });
-    const { data: listener } = supabase.auth.onAuthStateChange((_event, nextSession) => {
+  useEffect(() => {
+    let active = true;
+
+    const loadForSession = async (nextSession) => {
+      if (!active) return;
+      setLoadingProfile(true);
       setSession(nextSession);
+
+      if (nextSession?.user?.id) {
+        try {
+          const result = await api.getProfile(nextSession.user.id);
+          if (active) {
+            setProfile(result.profile);
+          }
+        } catch (_err) {
+          if (active) {
+            setProfile(null);
+          }
+        } finally {
+          if (active) {
+            setLoadingProfile(false);
+          }
+        }
+        return;
+      }
+
+      setProfile(null);
       setLoadingProfile(false);
+    };
+
+    supabase.auth.getSession().then(({ data }) => {
+      loadForSession(data.session);
     });
-    return () => listener.subscription.unsubscribe();
+
+    const { data: listener } = supabase.auth.onAuthStateChange((_event, nextSession) => {
+      loadForSession(nextSession);
+    });
+
+    return () => {
+      active = false;
+      listener.subscription.unsubscribe();
+    };
   }, []);
 
   const handleStart = async (selectedMode, profileDraft) => {
-    const userId = session?.user?.id;
     const data = await api.saveProfile({
-      id: userId,
+      id: session?.user?.id,
       ...profileDraft,
       preferred_mode: selectedMode,
     });
     setProfile(data.profile);
-    setMode(selectedMode);
-    setScreen("chat");
-  };
-
-  const handleNewSession = () => {
-    setScreen("welcome");
+    window.location.hash = "chat";
   };
 
   if (!session) {
@@ -57,12 +70,18 @@ export default function App() {
   }
 
   if (loadingProfile) {
-    return null;
+    return <div style={{ minHeight: "100vh", display: "grid", placeItems: "center", color: "var(--text-muted)" }}>Loading your account…</div>;
   }
 
-  return (!profile || screen === "welcome") ? (
-    <WelcomeScreen onStart={handleStart} profile={profile} />
-  ) : (
-    <ChatScreen mode={mode} onNewSession={handleNewSession} profile={profile} onProfileUpdate={setProfile} session={session} />
+  if (!profile) {
+    return <WelcomeScreen onStart={handleStart} profile={profile} accountEmail={session.user?.email || ""} />;
+  }
+
+  return (
+    <WorkspaceShell
+      profile={profile}
+      session={session}
+      onProfileUpdate={setProfile}
+    />
   );
 }
