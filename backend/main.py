@@ -10,6 +10,8 @@ from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel, Field
 
+from backend.care import build_google_calendar_url, next_checkin_due, suggest_cbt_homework, summarize_session
+from backend import store
 from model.engine import Anupama
 from backend.openai_responder import generate_reply
 
@@ -19,14 +21,39 @@ DEFAULT_CHECKPOINT_DIR = ROOT_DIR / "checkpoints"
 
 
 class ChatRequest(BaseModel):
+    user_id: str | None = None
     session_id: str | None = None
     message: str = Field(..., min_length=1)
     mode: Literal["support", "cbt", "intake"] = "support"
 
 
 class MoodLogRequest(BaseModel):
+    user_id: str
     score: int = Field(..., ge=1, le=5)
     note: str | None = None
+
+
+class ProfileRequest(BaseModel):
+    id: str | None = None
+    name: str = Field(..., min_length=1)
+    email: str | None = None
+    timezone: str = "America/Los_Angeles"
+    goals: list[str] = Field(default_factory=list)
+    preferred_mode: Literal["support", "cbt", "intake"] = "support"
+
+
+class HomeworkUpdateRequest(BaseModel):
+    status: Literal["assigned", "in_progress", "completed"]
+    reflection: str | None = None
+
+
+class ScheduleRequest(BaseModel):
+    profile_id: str
+    title: str = Field(..., min_length=1)
+    description: str | None = None
+    start_at: str
+    end_at: str
+    timezone: str = "America/Los_Angeles"
 
 
 class ChatTurn(BaseModel):
@@ -160,6 +187,7 @@ app.add_middleware(
 )
 
 SESSIONS: dict[str, SessionState] = {}
+store.init_db()
 
 
 @app.get("/")
@@ -188,6 +216,81 @@ def health():
     }
 
 
+@app.post("/profiles")
+def upsert_profile(payload: ProfileRequest):
+    profile = store.upsert_profile(
+        profile_id=payload.id,
+        name=payload.name.strip(),
+        email=payload.email,
+        timezone=payload.timezone,
+        goals=payload.goals,
+        preferred_mode=payload.preferred_mode,
+        now=utc_now(),
+    )
+    return {"profile": profile}
+
+
+@app.get("/profiles/{profile_id}")
+def get_profile(profile_id: str):
+    profile = store.get_profile(profile_id)
+    if not profile:
+        raise HTTPException(status_code=404, detail="Profile not found")
+    return {"profile": profile}
+
+
+@app.get("/profiles/{profile_id}/dashboard")
+def dashboard(profile_id: str):
+    profile = store.get_profile(profile_id)
+    if not profile:
+        raise HTTPException(status_code=404, detail="Profile not found")
+    recent_sessions = store.list_recent_sessions(profile_id)
+    upcoming_sessions = store.list_upcoming_schedules(profile_id)
+    pending_homework = store.list_pending_homework(profile_id)
+    return {
+        "profile": profile,
+        "recent_sessions": recent_sessions,
+        "upcoming_sessions": upcoming_sessions,
+        "pending_homework": pending_homework,
+    }
+
+
+@app.post("/profiles/{profile_id}/schedule")
+def schedule_session(profile_id: str, payload: ScheduleRequest):
+    profile = store.get_profile(profile_id)
+    if not profile:
+        raise HTTPException(status_code=404, detail="Profile not found")
+    calendar_url = build_google_calendar_url(
+        title=payload.title,
+        description=payload.description or "Follow-up Anupama session",
+        start_at=payload.start_at,
+        end_at=payload.end_at,
+    )
+    item = store.create_schedule(
+        profile_id=profile_id,
+        title=payload.title,
+        description=payload.description,
+        start_at=payload.start_at,
+        end_at=payload.end_at,
+        timezone=payload.timezone,
+        calendar_url=calendar_url,
+        now=utc_now(),
+    )
+    return {"schedule": item}
+
+
+@app.get("/profiles/{profile_id}/schedule")
+def list_schedule(profile_id: str):
+    return {"items": store.list_upcoming_schedules(profile_id)}
+
+
+@app.post("/homework/{homework_id}")
+def update_homework(homework_id: str, payload: HomeworkUpdateRequest):
+    item = store.update_homework(homework_id, status=payload.status, reflection=payload.reflection, now=utc_now())
+    if not item:
+        raise HTTPException(status_code=404, detail="Homework not found")
+    return {"homework": item}
+
+
 @app.post("/chat")
 def chat(payload: ChatRequest):
     try:
@@ -195,7 +298,28 @@ def chat(payload: ChatRequest):
     except Exception as exc:
         raise HTTPException(status_code=500, detail=str(exc)) from exc
 
-    session_id = payload.session_id or str(uuid4())
+    if not payload.user_id:
+        raise HTTPException(status_code=400, detail="user_id is required")
+
+    profile = store.get_profile(payload.user_id)
+    if not profile:
+        raise HTTPException(status_code=404, detail="Profile not found")
+
+    session_data = store.get_session(payload.session_id) if payload.session_id else None
+    if payload.session_id and not session_data:
+        raise HTTPException(status_code=404, detail="Session not found")
+
+    if session_data:
+        session_id = session_data["id"]
+    else:
+        session_data = store.create_session(
+            profile_id=payload.user_id,
+            mode=payload.mode,
+            title=f"{payload.mode.title()} session",
+            now=utc_now(),
+        )
+        session_id = session_data["id"]
+
     session = SESSIONS.get(session_id)
     if session is None:
         session = SessionState(id=session_id, created_at=utc_now())
@@ -208,12 +332,24 @@ def chat(payload: ChatRequest):
         mode=payload.mode,
     )
     session.history.append(user_turn)
+    store.add_message(
+        session_id=session_id,
+        role="user",
+        content=payload.message.strip(),
+        timestamp=user_turn.timestamp,
+    )
 
     classification = engine.classify(payload.message.strip())
     explicit_self_harm = has_pattern(payload.message, SELF_HARM_PATTERNS)
     violence_disclosure = has_pattern(payload.message, VIOLENCE_PATTERNS)
     is_crisis = classification.crisis_label == "crisis" and explicit_self_harm
     conditioning_tokens = engine._build_cond_tokens(classification, payload.mode) if not is_crisis else []
+    recent_sessions = store.list_recent_sessions(payload.user_id, limit=2)
+    previous_summary = next(
+        (item["summary"] for item in recent_sessions if item["id"] != session_id and item.get("summary")),
+        None,
+    )
+    pending_homework = store.list_pending_homework(payload.user_id)
 
     if is_crisis:
         reply_text = engine.CRISIS_PROTOCOL
@@ -225,6 +361,9 @@ def chat(payload: ChatRequest):
                 message=payload.message.strip(),
                 mode=payload.mode,
                 history=[turn.model_dump() for turn in session.history[:-1]],
+                profile=profile,
+                memory_context=previous_summary,
+                pending_homework=pending_homework,
                 mood_score=classification.mood_score,
                 distortion=classification.distortion,
                 crisis_label=classification.crisis_label,
@@ -242,8 +381,42 @@ def chat(payload: ChatRequest):
         is_crisis=is_crisis,
     )
     session.history.append(assistant_turn)
+    store.add_message(
+        session_id=session_id,
+        role="assistant",
+        content=reply_text,
+        timestamp=assistant_turn.timestamp,
+        mood_score=classification.mood_score,
+        distortion=classification.distortion,
+        is_crisis=is_crisis,
+    )
+
+    homework_item = None
+    if payload.mode == "cbt" and not is_crisis:
+        title, instructions = suggest_cbt_homework(classification.distortion)
+        homework_item = store.create_homework(
+            profile_id=payload.user_id,
+            session_id=session_id,
+            title=title,
+            instructions=instructions,
+            due_at=next_checkin_due(assistant_turn.timestamp),
+            now=assistant_turn.timestamp,
+        )
+
+    session_messages = store.list_session_messages(session_id)
+    store.update_session_summary(
+        session_id,
+        summarize_session(
+            mode=payload.mode,
+            messages=session_messages,
+            distortion=classification.distortion,
+            mood_score=classification.mood_score,
+        ),
+        assistant_turn.timestamp,
+    )
 
     return {
+        "user_id": payload.user_id,
         "session_id": session_id,
         "reply": reply_text,
         "timestamp": assistant_turn.timestamp,
@@ -253,43 +426,58 @@ def chat(payload: ChatRequest):
         "distortion": classification.distortion,
         "crisis_label": classification.crisis_label,
         "conditioning_tokens": conditioning_tokens,
+        "homework": homework_item,
+        "previous_session_summary": previous_summary,
+        "pending_homework": pending_homework,
     }
 
 
 @app.post("/mood/{session_id}")
 def log_mood(session_id: str, payload: MoodLogRequest):
-    session = SESSIONS.get(session_id)
+    session = store.get_session(session_id)
     if session is None:
         raise HTTPException(status_code=404, detail="Session not found")
 
-    entry = {
-        "score": payload.score,
-        "note": payload.note,
-        "timestamp": utc_now(),
-    }
-    session.mood_log.append(entry)
-    return {"session_id": session_id, "mood_log": session.mood_log}
+    entry = store.log_mood(
+        session_id=session_id,
+        profile_id=payload.user_id,
+        score=payload.score,
+        note=payload.note,
+        timestamp=utc_now(),
+    )
+    return {"session_id": session_id, "mood_log": get_session_mood(session_id)["mood_log"], "entry": entry}
 
 
 @app.get("/mood/{session_id}")
 def get_mood(session_id: str):
-    session = SESSIONS.get(session_id)
+    session = store.get_session(session_id)
     if session is None:
         raise HTTPException(status_code=404, detail="Session not found")
-    return {"session_id": session_id, "mood_log": session.mood_log}
+    return {"session_id": session_id, "mood_log": store.get_session_mood(session_id)}
 
 
 @app.get("/summary/{session_id}")
 def get_summary(session_id: str):
-    session = SESSIONS.get(session_id)
-    if session is None or not session.history:
+    session = store.get_session(session_id)
+    if session is None:
         raise HTTPException(status_code=404, detail="Session not found")
-    return {"session_id": session_id, "summary": build_summary(session)}
+    summary = session.get("summary")
+    if not summary:
+        messages = store.list_session_messages(session_id)
+        if not messages:
+            raise HTTPException(status_code=404, detail="Session not found")
+        summary = build_summary(
+            SessionState(
+                id=session["id"],
+                created_at=session["created_at"],
+                history=[ChatTurn(**message) for message in messages],
+                mood_log=store.get_session_mood(session_id),
+            )
+        )
+    return {"session_id": session_id, "summary": summary}
 
 
 @app.delete("/session/{session_id}")
 def delete_session(session_id: str):
-    session = SESSIONS.pop(session_id, None)
-    if session is None:
-        raise HTTPException(status_code=404, detail="Session not found")
+    SESSIONS.pop(session_id, None)
     return {"deleted": True, "session_id": session_id}
