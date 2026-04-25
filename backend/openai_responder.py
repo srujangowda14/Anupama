@@ -60,6 +60,10 @@ def generate_reply(
     memory_context: str | None,
     pending_homework: list[dict],
     should_close_session: bool,
+    is_first_session: bool,
+    session_phase: str,
+    treatment_phase: str,
+    treatment_guidance: str,
     mood_score: int,
     distortion: str,
     crisis_label: str,
@@ -79,10 +83,21 @@ def generate_reply(
         f"- previous_session_context: {memory_context or 'none'}\n"
         f"- pending_homework: {', '.join(item['title'] for item in pending_homework) if pending_homework else 'none'}\n"
         f"- should_close_session: {should_close_session}\n"
+        f"- is_first_session: {is_first_session}\n"
+        f"- session_phase: {session_phase}\n"
+        f"- treatment_phase: {treatment_phase}\n"
+        f"- treatment_guidance: {treatment_guidance}\n"
+        "Therapist-style CBT session strategy:\n"
+        "- Opening phase: briefly check mood, bridge from the last session if any, ask about previous homework if any, "
+        "and collaborate on one focus for today.\n"
+        "- Working phase: stay with one main problem, identify situation-thought-emotion-behavior links, use guided discovery, "
+        "and offer concise Socratic questions rather than long lectures.\n"
+        "- Closing phase: summarize the main takeaway, turn it into one concrete between-session practice, and ask about "
+        "confidence or obstacles before ending.\n"
         "If mode is CBT, prefer this response shape when it fits naturally:\n"
-        "1. Brief validation and summary of the user's thought/emotion.\n"
+        "1. Brief validation and summary of the user's thought or emotion.\n"
         "2. Identify the likely automatic thought or thinking trap.\n"
-        "3. Ask one focused Socratic question OR compare evidence for and against.\n"
+        "3. Ask one focused Socratic question or compare evidence for and against.\n"
         "4. Offer one balanced reframe in plain language.\n"
         "5. End with one tiny actionable next step.\n"
         "For trauma, abuse, or violence disclosures, prioritize safety and stabilization before "
@@ -90,8 +105,18 @@ def generate_reply(
         "If there is pending homework from a previous session, briefly ask about it near the start "
         "before moving into new coaching.\n"
         "When should_close_session is true, briefly summarize the key takeaway from this session, "
-        "transition into an action plan for between sessions, and end with a warm check-in about "
-        "the user's readiness for the next step.\n"
+        "transition into an action plan for between sessions, check how realistic that plan feels, and end with a warm "
+        "question about readiness for the next step.\n"
+        "When is_first_session is true, treat the conversation as an intake and rapport-building session: "
+        "gently learn the person's history, current stressors, goals, coping methods, supports, and what they "
+        "want from therapy. Do not assign homework in the first session. Close by summarizing your understanding "
+        "of the person, their current pattern, and what you would focus on next time.\n"
+        "When session_phase is opening, keep the response exploratory and agenda-setting.\n"
+        "When session_phase is working, stay focused on one issue and go deeper rather than covering many topics.\n"
+        "When session_phase is closing, summarize the session, connect it to next-session goals, and make the between-session "
+        "practice concrete and realistically sized.\n"
+        "When treatment_phase is termination_review, help the user review gains, identify warning signs, "
+        "name which CBT tools helped most, and sketch a relapse-prevention or maintenance plan.\n"
     )
 
     messages = [{"role": "system", "content": developer_prompt}]
