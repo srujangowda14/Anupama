@@ -29,6 +29,10 @@ export default function WelcomeScreen({ onStart, profile }) {
   const [name, setName] = useState(profile?.name || "");
   const [email, setEmail] = useState(profile?.email || "");
   const [goals, setGoals] = useState((profile?.goals || []).join(", "));
+  const [dateOfBirth, setDateOfBirth] = useState(profile?.date_of_birth || "");
+  const [gender, setGender] = useState(profile?.gender || "prefer_not_to_say");
+  const [sexualOrientation, setSexualOrientation] = useState(profile?.sexual_orientation || "prefer_not_to_say");
+  const [location, setLocation] = useState(profile?.location || "");
   const [starting, setStarting] = useState(false);
 
   const handleStart = async () => {
@@ -39,6 +43,10 @@ export default function WelcomeScreen({ onStart, profile }) {
         email: email.trim() || null,
         timezone: Intl.DateTimeFormat().resolvedOptions().timeZone,
         goals: goals.split(",").map((goal) => goal.trim()).filter(Boolean),
+        date_of_birth: dateOfBirth || null,
+        gender,
+        sexual_orientation: sexualOrientation,
+        location: location.trim() || null,
       });
     } finally {
       setStarting(false);
@@ -75,6 +83,25 @@ export default function WelcomeScreen({ onStart, profile }) {
         <div style={styles.profileForm}>
           <input style={styles.input} value={name} onChange={(e) => setName(e.target.value)} placeholder="Your name" />
           <input style={styles.input} value={email} onChange={(e) => setEmail(e.target.value)} placeholder="Email (optional)" />
+          <input style={styles.input} type="date" value={dateOfBirth} onChange={(e) => setDateOfBirth(e.target.value)} />
+          <select style={styles.input} value={gender} onChange={(e) => setGender(e.target.value)}>
+            <option value="female">Female</option>
+            <option value="male">Male</option>
+            <option value="nonbinary">Nonbinary</option>
+            <option value="questioning">Questioning</option>
+            <option value="prefer_not_to_say">Prefer not to say</option>
+          </select>
+          <select style={styles.input} value={sexualOrientation} onChange={(e) => setSexualOrientation(e.target.value)}>
+            <option value="straight">Straight</option>
+            <option value="gay">Gay</option>
+            <option value="lesbian">Lesbian</option>
+            <option value="bisexual">Bisexual</option>
+            <option value="pansexual">Pansexual</option>
+            <option value="asexual">Asexual</option>
+            <option value="questioning">Questioning</option>
+            <option value="prefer_not_to_say">Prefer not to say</option>
+          </select>
+          <input style={styles.input} value={location} onChange={(e) => setLocation(e.target.value)} placeholder="Location" />
           <textarea style={{ ...styles.input, minHeight: 64, resize: "vertical" }} value={goals} onChange={(e) => setGoals(e.target.value)} placeholder="Goals for therapy, separated by commas" />
         </div>
 

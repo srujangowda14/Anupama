@@ -1,5 +1,6 @@
 import React, { useState } from "react";
 import { api } from "../utils/api";
+import { supabase } from "../utils/supabase";
 
 // ─── Coping Exercises ────────────────────────────────────────────────────────
 
@@ -130,21 +131,40 @@ export function ProfilePanel({ profile, onProfileUpdate }) {
   const [name, setName] = useState(profile?.name || "");
   const [email, setEmail] = useState(profile?.email || "");
   const [goals, setGoals] = useState((profile?.goals || []).join(", "));
+  const [dateOfBirth, setDateOfBirth] = useState(profile?.date_of_birth || "");
+  const [gender, setGender] = useState(profile?.gender || "prefer_not_to_say");
+  const [sexualOrientation, setSexualOrientation] = useState(profile?.sexual_orientation || "prefer_not_to_say");
+  const [location, setLocation] = useState(profile?.location || "");
   const [saved, setSaved] = useState(false);
+  const [showDelete, setShowDelete] = useState(false);
 
   const save = async () => {
     const data = await api.saveProfile({
-      id: profile?.id || localStorage.getItem("anupama_profile_id"),
+      id: profile?.id,
       name: name.trim() || "Anupama user",
       email: email.trim() || null,
       timezone: profile?.timezone || Intl.DateTimeFormat().resolvedOptions().timeZone,
       goals: goals.split(",").map((goal) => goal.trim()).filter(Boolean),
       preferred_mode: profile?.preferred_mode || "support",
+      date_of_birth: dateOfBirth || null,
+      gender,
+      sexual_orientation: sexualOrientation,
+      location: location.trim() || null,
     });
-    localStorage.setItem("anupama_profile_id", data.profile.id);
     onProfileUpdate(data.profile);
     setSaved(true);
     setTimeout(() => setSaved(false), 1500);
+  };
+
+  const logout = async () => {
+    await supabase.auth.signOut();
+    window.location.reload();
+  };
+
+  const deleteAccount = async () => {
+    await api.deleteAccount();
+    await supabase.auth.signOut();
+    window.location.reload();
   };
 
   return (
@@ -152,9 +172,44 @@ export function ProfilePanel({ profile, onProfileUpdate }) {
       <p style={styles.sectionLabel}>Your profile</p>
       <input style={styles.input} value={name} onChange={(e) => setName(e.target.value)} placeholder="Name" />
       <input style={styles.input} value={email} onChange={(e) => setEmail(e.target.value)} placeholder="Email" />
+      <input style={styles.input} type="date" value={dateOfBirth} onChange={(e) => setDateOfBirth(e.target.value)} />
+      <select style={styles.input} value={gender} onChange={(e) => setGender(e.target.value)}>
+        <option value="female">Female</option>
+        <option value="male">Male</option>
+        <option value="nonbinary">Nonbinary</option>
+        <option value="questioning">Questioning</option>
+        <option value="prefer_not_to_say">Prefer not to say</option>
+      </select>
+      <select style={styles.input} value={sexualOrientation} onChange={(e) => setSexualOrientation(e.target.value)}>
+        <option value="straight">Straight</option>
+        <option value="gay">Gay</option>
+        <option value="lesbian">Lesbian</option>
+        <option value="bisexual">Bisexual</option>
+        <option value="pansexual">Pansexual</option>
+        <option value="asexual">Asexual</option>
+        <option value="questioning">Questioning</option>
+        <option value="prefer_not_to_say">Prefer not to say</option>
+      </select>
+      <input style={styles.input} value={location} onChange={(e) => setLocation(e.target.value)} placeholder="Location" />
       <textarea style={{ ...styles.input, minHeight: 68, resize: "vertical" }} value={goals} onChange={(e) => setGoals(e.target.value)} placeholder="Goals, separated by commas" />
       <button onClick={save} style={styles.generateBtn}>Save Profile</button>
       {saved && <p style={{ fontSize: 12, color: "#6B9E7A", marginTop: 8 }}>Saved</p>}
+      <div style={{ display: "flex", gap: 8, marginTop: 14 }}>
+        <button onClick={logout} style={styles.secondaryBtn}>Log Out</button>
+        <button onClick={() => setShowDelete((v) => !v)} style={styles.dangerBtn}>
+          {showDelete ? "Keep Account" : "Delete Account"}
+        </button>
+      </div>
+      {showDelete && (
+        <div style={styles.deleteCard}>
+          <p style={{ fontSize: 12, color: "#E7C5C5", lineHeight: 1.6 }}>
+            This will softly delete your account and remove your profile, session memory, homework, and schedules.
+          </p>
+          <button onClick={deleteAccount} style={{ ...styles.dangerBtn, marginTop: 10, width: "100%" }}>
+            Permanently Delete My Account
+          </button>
+        </div>
+      )}
     </div>
   );
 }
@@ -342,6 +397,31 @@ const styles = {
     background: "rgba(255,255,255,0.03)",
     color: "var(--text-primary)",
     fontSize: 12,
+  },
+  secondaryBtn: {
+    flex: 1,
+    padding: "10px",
+    borderRadius: "var(--radius-sm)",
+    border: "1px solid var(--border-mid)",
+    background: "rgba(255,255,255,0.04)",
+    color: "var(--text-secondary)",
+    fontSize: 12,
+  },
+  dangerBtn: {
+    flex: 1,
+    padding: "10px",
+    borderRadius: "var(--radius-sm)",
+    border: "1px solid rgba(192,64,64,0.25)",
+    background: "rgba(192,64,64,0.08)",
+    color: "#E4B7B7",
+    fontSize: 12,
+  },
+  deleteCard: {
+    marginTop: 12,
+    padding: 12,
+    borderRadius: "var(--radius-sm)",
+    border: "1px solid rgba(192,64,64,0.18)",
+    background: "rgba(192,64,64,0.06)",
   },
   helperLabel: {
     fontSize: 11,

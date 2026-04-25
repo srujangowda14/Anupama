@@ -63,7 +63,7 @@ export default function ChatScreen({ mode, onNewSession, profile, onProfileUpdat
           <div>
             <div style={styles.brandName}>Anupama</div>
             <div style={{ fontSize: 11, color: meta.color, fontWeight: 500 }}>
-              {meta.icon} {meta.label}
+              {profile?.name || "Your profile"} · {meta.icon} {meta.label}
             </div>
           </div>
         </div>
@@ -90,7 +90,7 @@ export default function ChatScreen({ mode, onNewSession, profile, onProfileUpdat
         <div style={styles.panelContent}>
           {tab === "profile" && <ProfilePanel profile={profile} onProfileUpdate={onProfileUpdate} />}
           {tab === "mood"    && <MoodPanel sessionId={sessionId} />}
-          {tab === "plan"    && <CarePlanPanel profileId={profile?.id || localStorage.getItem("anupama_profile_id")} latestHomework={homework} previousSummary={previousSummary} />}
+          {tab === "plan"    && <CarePlanPanel profileId={profile?.id} latestHomework={homework} previousSummary={previousSummary} />}
           {tab === "summary" && <SummaryPanel sessionId={sessionId} />}
         </div>
 
