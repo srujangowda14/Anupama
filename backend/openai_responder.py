@@ -56,6 +56,9 @@ def generate_reply(
     message: str,
     mode: str,
     history: list[dict],
+    profile: dict | None,
+    memory_context: str | None,
+    pending_homework: list[dict],
     mood_score: int,
     distortion: str,
     crisis_label: str,
@@ -70,6 +73,10 @@ def generate_reply(
         f"- crisis_label: {crisis_label}\n"
         f"- mood_score: {mood_score}/5\n"
         f"- distortion: {distortion}\n"
+        f"- profile_name: {profile.get('name') if profile else 'unknown'}\n"
+        f"- user_goals: {', '.join(profile.get('goals', [])) if profile else 'none'}\n"
+        f"- previous_session_context: {memory_context or 'none'}\n"
+        f"- pending_homework: {', '.join(item['title'] for item in pending_homework) if pending_homework else 'none'}\n"
         "If mode is CBT, prefer this response shape when it fits naturally:\n"
         "1. Brief validation and summary of the user's thought/emotion.\n"
         "2. Identify the likely automatic thought or thinking trap.\n"
@@ -78,6 +85,8 @@ def generate_reply(
         "5. End with one tiny actionable next step.\n"
         "For trauma, abuse, or violence disclosures, prioritize safety and stabilization before "
         "any cognitive reframe.\n"
+        "If there is pending homework from a previous session, briefly ask about it near the start "
+        "before moving into new coaching.\n"
     )
 
     messages = [{"role": "system", "content": developer_prompt}]
