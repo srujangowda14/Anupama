@@ -1,38 +1,30 @@
-import React, { useEffect, useRef, useState } from "react";
+import React, { useEffect, useRef } from "react";
 import { useChat } from "../hooks/useChat";
 import ChatMessage from "./ChatMessage";
 import ChatInput from "./ChatInput";
-import MoodPanel from "./MoodPanel";
-import { CarePlanPanel, ProfilePanel, SummaryPanel } from "./SidebarPanels";
 
 const MODE_META = {
-  support: { icon: "🌿", label: "Support Buddy",     color: "#6B9E7A" },
-  cbt:     { icon: "🧠", label: "CBT Coach",         color: "#7B7FD4" },
-  intake:  { icon: "📋", label: "Intake Assistant",  color: "#C8944A" },
+  support: { icon: "🌿", label: "Support Buddy", color: "#6B9E7A" },
+  cbt: { icon: "🧠", label: "CBT Coach", color: "#7B7FD4" },
+  intake: { icon: "📋", label: "Intake Assistant", color: "#C8944A" },
 };
-
-const TABS = ["profile", "mood", "plan", "summary"];
 
 const OPENING_MESSAGES = {
-  support: "Hello, I'm Anupama. This is a safe space — no judgment here.\n\nHow are you feeling today?",
-  cbt:     "Hi, I'm Anupama in CBT Coach mode. We'll work through your thoughts together, step by step.\n\nWhat's been on your mind lately?",
-  intake:  "Hello. I'm here to help you organize your thoughts before speaking with a therapist.\n\nTake your time — what's the main thing you'd like to talk about?",
+  support: "Hi, I’m Anupama. We can start gently. What has this week felt like for you?",
+  cbt: "Hi, I’m Anupama in CBT Coach mode. We’ll start by understanding what has been weighing on you, then work toward one helpful next step.",
+  intake: "Hi, I’m Anupama in Intake Assistant mode. We can use this session to gather your story, what feels hardest lately, and what you want support with.",
 };
 
-export default function ChatScreen({ mode, onNewSession, profile, onProfileUpdate }) {
-  const { messages, sessionId, loading, send, homework, previousSummary } = useChat(mode);
-  const [tab, setTab] = useState("profile");
-  const [hasOpened, setHasOpened] = useState(false);
+export default function ChatScreen({ mode, profile, onSessionActivity, onOpenPage }) {
+  const { messages, loading, send, homework, previousSummary, sessionMeta } = useChat(mode);
   const bottomRef = useRef(null);
   const meta = MODE_META[mode];
 
-  // Scroll to bottom on new messages
   useEffect(() => {
     bottomRef.current?.scrollIntoView({ behavior: "smooth" });
   }, [messages, loading]);
 
-  // Show opening message once
-  const allMessages = hasOpened
+  const allMessages = messages.length
     ? messages
     : [
         {
@@ -41,134 +33,103 @@ export default function ChatScreen({ mode, onNewSession, profile, onProfileUpdat
           content: OPENING_MESSAGES[mode],
           timestamp: new Date().toISOString(),
         },
-        ...messages,
       ];
 
-  const handleSend = (text) => {
-    setHasOpened(true);
-    send(text);
+  const handleSend = async (text) => {
+    const data = await send(text);
+    if (data && onSessionActivity) {
+      onSessionActivity(data);
+    }
   };
 
   return (
     <div style={styles.root}>
-      {/* ── Sidebar ─────────────────────────────────────── */}
-      <aside style={styles.sidebar}>
-        {/* Brand */}
-        <div style={styles.brand}>
-          <div style={styles.brandAvatar}>
-            <span style={{ animation: "breathe 4s ease-in-out infinite", display: "inline-block" }}>
-              🌿
-            </span>
+      <header style={styles.header}>
+        <div>
+          <div style={styles.eyebrow}>Session Workspace</div>
+          <div style={styles.headerTitle}>
+            <span style={{ fontSize: 20 }}>{meta.icon}</span>
+            <span>{meta.label}</span>
           </div>
-          <div>
-            <div style={styles.brandName}>Anupama</div>
-            <div style={{ fontSize: 11, color: meta.color, fontWeight: 500 }}>
-              {profile?.name || "Your profile"} · {meta.icon} {meta.label}
-            </div>
+          <div style={styles.headerSub}>
+            {profile?.name || "You"} · {sessionMeta.treatmentPlan?.phase_title || "Therapeutic support"}
           </div>
         </div>
-
-        {/* Tabs */}
-        <div style={styles.tabs}>
-          {TABS.map((t) => (
-            <button
-              key={t}
-              onClick={() => setTab(t)}
-              style={{
-                ...styles.tab,
-                background: tab === t ? "rgba(107,158,122,0.15)" : "none",
-                color: tab === t ? "#6B9E7A" : "var(--text-muted)",
-                fontWeight: tab === t ? 500 : 400,
-              }}
-            >
-              {t}
-            </button>
-          ))}
-        </div>
-
-        {/* Panel content */}
-        <div style={styles.panelContent}>
-          {tab === "profile" && <ProfilePanel profile={profile} onProfileUpdate={onProfileUpdate} />}
-          {tab === "mood"    && <MoodPanel sessionId={sessionId} />}
-          {tab === "plan"    && <CarePlanPanel profileId={profile?.id} latestHomework={homework} previousSummary={previousSummary} />}
-          {tab === "summary" && <SummaryPanel sessionId={sessionId} />}
-        </div>
-
-        {/* Footer */}
-        <div style={styles.sidebarFooter}>
-          <button onClick={onNewSession} style={styles.newSessionBtn}>
-            ← New Session
+        <div style={styles.headerActions}>
+          <button style={styles.secondaryBtn} onClick={() => onOpenPage?.("sessions")}>
+            Sessions
           </button>
-          <a
-            href="tel:988"
-            style={styles.crisisBtn}
-          >
-            🆘 988 Crisis Line
-          </a>
+          <button style={styles.secondaryBtn} onClick={() => onOpenPage?.("homework")}>
+            Homework
+          </button>
         </div>
-      </aside>
+      </header>
 
-      {/* ── Chat area ───────────────────────────────────── */}
-      <main style={styles.main}>
-        {/* Header */}
-        <header style={styles.header}>
-          <span style={{ fontSize: 20 }}>{meta.icon}</span>
-          <div>
-            <div style={styles.headerTitle}>{meta.label}</div>
-            <div style={styles.headerSub}>
-              Custom BiLSTM model · Not a substitute for professional care
-            </div>
+      <div style={styles.contextGrid}>
+        <div style={styles.contextCard}>
+          <div style={styles.contextTitle}>Current phase</div>
+          <div style={{ ...styles.phaseBadge, borderColor: `${meta.color}55`, color: meta.color }}>
+            {sessionMeta.sessionPhase === "closing"
+              ? "Closing"
+              : sessionMeta.sessionPhase === "working"
+                ? "Working"
+                : "Opening"}
           </div>
-          <div style={styles.statusDot}>
-            <span
-              style={{
-                width: 6,
-                height: 6,
-                borderRadius: "50%",
-                background: "#6B9E7A",
-                display: "inline-block",
-                animation: "pulse 2s ease-in-out infinite",
-                marginRight: 5,
-              }}
-            />
-            <span style={{ fontSize: 11, color: "#6B9E7A" }}>Active</span>
-          </div>
-        </header>
-
-        {/* Messages */}
-        <div style={styles.messages}>
-          {allMessages.map((msg) => (
-            <ChatMessage key={msg.id} msg={msg} />
-          ))}
-
-          {/* Typing indicator */}
-          {loading && (
-            <div style={{ display: "flex", alignItems: "flex-end", gap: 10, marginBottom: 18 }}>
-              <div style={styles.typingAvatar}>🌿</div>
-              <div style={styles.typingBubble}>
-                {[0, 0.2, 0.4].map((d, i) => (
-                  <span
-                    key={i}
-                    style={{
-                      width: 6,
-                      height: 6,
-                      borderRadius: "50%",
-                      background: "#6B9E7A",
-                      display: "inline-block",
-                      animation: `pulse 1.2s ${d}s ease-in-out infinite`,
-                    }}
-                  />
-                ))}
-              </div>
-            </div>
-          )}
-
-          <div ref={bottomRef} />
+          <p style={styles.contextText}>
+            {sessionMeta.isFirstSession
+              ? "This first session is being used to get to know the person, understand their history, and agree on what future work should focus on."
+              : sessionMeta.sessionPhase === "opening"
+                ? "This is a good time for mood check-ins, bridging from the last session, and choosing one focus for today."
+                : sessionMeta.sessionPhase === "closing"
+                  ? "The assistant is shifting toward summarizing the key takeaway and setting up the between-session practice."
+                  : "The assistant should stay with one main concern and work it collaboratively rather than rushing through several topics."}
+          </p>
         </div>
 
-        {/* Input */}
-        <ChatInput onSend={handleSend} loading={loading} />
-      </main>
+        {previousSummary && (
+          <div style={styles.contextCard}>
+            <div style={styles.contextTitle}>Prior context in memory</div>
+            <p style={styles.contextText}>
+              {previousSummary.length > 280 ? `${previousSummary.slice(0, 280)}…` : previousSummary}
+            </p>
+          </div>
+        )}
+
+        {homework && (
+          <div style={styles.contextCard}>
+            <div style={styles.contextTitle}>Assigned for next time</div>
+            <div style={styles.homeworkTitle}>{homework.title}</div>
+            <p style={styles.contextText}>{homework.instructions}</p>
+          </div>
+        )}
+      </div>
+
+      <div style={styles.messages}>
+        {allMessages.map((msg) => (
+          <ChatMessage key={msg.id} msg={msg} />
+        ))}
+
+        {loading && (
+          <div style={styles.loadingRow}>
+            <div style={styles.loadingAvatar}>🌿</div>
+            <div style={styles.loadingBubble}>
+              {[0, 0.2, 0.4].map((delay, index) => (
+                <span
+                  key={index}
+                  style={{
+                    ...styles.loadingDot,
+                    animation: `pulse 1.2s ${delay}s ease-in-out infinite`,
+                  }}
+                />
+              ))}
+            </div>
+          </div>
+        )}
+
+        <div ref={bottomRef} />
+      </div>
+
+      <ChatInput onSend={handleSend} loading={loading} />
     </div>
   );
 }
@@ -176,137 +137,107 @@ export default function ChatScreen({ mode, onNewSession, profile, onProfileUpdat
 const styles = {
   root: {
     display: "flex",
-    height: "100vh",
-    overflow: "hidden",
-    background: "var(--bg-deep)",
-  },
-
-  // Sidebar
-  sidebar: {
-    width: 260,
-    flexShrink: 0,
-    borderRight: "1px solid var(--border-subtle)",
-    display: "flex",
     flexDirection: "column",
-    padding: "20px 16px",
-    background: "var(--bg-surface)",
-    overflowY: "auto",
-  },
-  brand: {
-    display: "flex",
-    alignItems: "center",
-    gap: 10,
-    marginBottom: 22,
-  },
-  brandAvatar: {
-    width: 38,
-    height: 38,
-    borderRadius: "50%",
-    background: "linear-gradient(135deg, #2A3D2E, #1E3028)",
-    border: "1.5px solid rgba(107,158,122,0.25)",
-    display: "flex",
-    alignItems: "center",
-    justifyContent: "center",
-    fontSize: 16,
-    flexShrink: 0,
-  },
-  brandName: {
-    fontFamily: "var(--font-display)",
-    fontSize: 17,
-    color: "var(--text-primary)",
-  },
-  tabs: {
-    display: "flex",
-    background: "rgba(255,255,255,0.03)",
-    borderRadius: "var(--radius-sm)",
-    padding: 3,
-    marginBottom: 18,
-    gap: 2,
-  },
-  tab: {
-    flex: 1,
-    padding: "6px 0",
-    borderRadius: 6,
-    border: "none",
-    fontSize: 11,
-    cursor: "pointer",
-    textTransform: "capitalize",
-    transition: "all 0.15s ease",
-    letterSpacing: "0.02em",
-  },
-  panelContent: {
-    flex: 1,
-    overflowY: "auto",
-  },
-  sidebarFooter: {
-    marginTop: 20,
-    paddingTop: 16,
-    borderTop: "1px solid var(--border-subtle)",
-    display: "flex",
-    flexDirection: "column",
-    gap: 8,
-  },
-  newSessionBtn: {
-    width: "100%",
-    padding: "8px",
-    borderRadius: "var(--radius-sm)",
-    border: "1px solid var(--border-subtle)",
-    background: "none",
-    color: "var(--text-muted)",
-    fontSize: 12,
-    cursor: "pointer",
-    transition: "color 0.15s ease",
-  },
-  crisisBtn: {
-    display: "block",
-    width: "100%",
-    padding: "8px",
-    borderRadius: "var(--radius-sm)",
-    border: "1px solid rgba(192,64,64,0.25)",
-    background: "rgba(192,64,64,0.05)",
-    color: "#C87A7A",
-    fontSize: 12,
-    textAlign: "center",
-    textDecoration: "none",
-    cursor: "pointer",
-  },
-
-  // Chat
-  main: {
-    flex: 1,
-    display: "flex",
-    flexDirection: "column",
-    overflow: "hidden",
+    height: "100%",
+    minHeight: 0,
   },
   header: {
     display: "flex",
-    alignItems: "center",
-    gap: 10,
-    padding: "14px 22px",
+    justifyContent: "space-between",
+    gap: 16,
+    alignItems: "flex-start",
+    padding: "24px 28px 18px",
     borderBottom: "1px solid var(--border-subtle)",
-    background: "var(--bg-surface)",
-    flexShrink: 0,
+    background: "rgba(255,255,255,0.02)",
+  },
+  eyebrow: {
+    fontSize: 11,
+    letterSpacing: "0.16em",
+    textTransform: "uppercase",
+    color: "var(--text-muted)",
+    marginBottom: 8,
   },
   headerTitle: {
+    display: "flex",
+    alignItems: "center",
+    gap: 10,
     fontFamily: "var(--font-display)",
-    fontSize: 16,
+    fontSize: 22,
     color: "var(--text-primary)",
   },
   headerSub: {
-    fontSize: 11,
-    color: "var(--text-muted)",
+    marginTop: 6,
+    fontSize: 13,
+    color: "var(--text-secondary)",
+    lineHeight: 1.5,
   },
-  statusDot: {
-    marginLeft: "auto",
+  headerActions: {
     display: "flex",
+    gap: 10,
+    flexWrap: "wrap",
+  },
+  secondaryBtn: {
+    border: "1px solid var(--border-subtle)",
+    background: "rgba(255,255,255,0.03)",
+    color: "var(--text-primary)",
+    borderRadius: 999,
+    padding: "10px 14px",
+    fontSize: 12,
+    cursor: "pointer",
+  },
+  contextGrid: {
+    display: "grid",
+    gridTemplateColumns: "repeat(auto-fit, minmax(240px, 1fr))",
+    gap: 14,
+    padding: "18px 28px 0",
+    flexShrink: 0,
+  },
+  contextCard: {
+    border: "1px solid var(--border-subtle)",
+    background: "rgba(255,255,255,0.02)",
+    borderRadius: 18,
+    padding: 16,
+  },
+  contextTitle: {
+    fontFamily: "var(--font-display)",
+    fontSize: 15,
+    color: "var(--text-primary)",
+    marginBottom: 10,
+  },
+  phaseBadge: {
+    display: "inline-flex",
     alignItems: "center",
+    border: "1px solid",
+    borderRadius: 999,
+    padding: "4px 10px",
+    fontSize: 11,
+    marginBottom: 10,
+  },
+  contextText: {
+    fontSize: 12,
+    color: "var(--text-secondary)",
+    lineHeight: 1.65,
+    whiteSpace: "pre-wrap",
+  },
+  homeworkTitle: {
+    fontSize: 13,
+    color: "var(--text-primary)",
+    marginBottom: 8,
+    fontWeight: 600,
   },
   messages: {
     flex: 1,
+    minHeight: 0,
     overflowY: "auto",
-    padding: "24px 22px 8px",
+    padding: "24px 28px 8px",
   },
-  typingAvatar: {
+  loadingRow: {
+    display: "flex",
+    alignItems: "flex-end",
+    gap: 10,
+    marginBottom: 18,
+  },
+  loadingAvatar: {
     width: 32,
     height: 32,
     borderRadius: "50%",
@@ -319,13 +250,18 @@ const styles = {
     flexShrink: 0,
     marginBottom: 20,
   },
-  typingBubble: {
-    background: "var(--bg-raised)",
-    border: "1.5px solid var(--border-subtle)",
-    borderRadius: "18px 18px 18px 4px",
-    padding: "12px 16px",
+  loadingBubble: {
     display: "flex",
-    gap: 5,
-    alignItems: "center",
+    gap: 6,
+    padding: "12px 14px",
+    borderRadius: 16,
+    background: "rgba(255,255,255,0.03)",
+  },
+  loadingDot: {
+    width: 6,
+    height: 6,
+    borderRadius: "50%",
+    background: "#6B9E7A",
+    display: "inline-block",
   },
 };

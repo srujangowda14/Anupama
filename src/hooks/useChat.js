@@ -8,6 +8,13 @@ export function useChat(mode) {
   const [error, setError] = useState(null);
   const [homework, setHomework] = useState(null);
   const [previousSummary, setPreviousSummary] = useState(null);
+  const [sessionMeta, setSessionMeta] = useState({
+    isFirstSession: false,
+    sessionClosing: false,
+    sessionPhase: "opening",
+    treatmentPlan: null,
+    pendingHomework: [],
+  });
   const addMessage = useCallback((msg) => {
     setMessages((prev) => [...prev, { id: Date.now() + Math.random(), ...msg }]);
   }, []);
@@ -31,6 +38,13 @@ export function useChat(mode) {
         if (!sessionId) setSessionId(data.session_id);
         if (data.homework) setHomework(data.homework);
         if (data.previous_session_summary) setPreviousSummary(data.previous_session_summary);
+        setSessionMeta({
+          isFirstSession: Boolean(data.is_first_session),
+          sessionClosing: Boolean(data.session_closing),
+          sessionPhase: data.session_phase || "working",
+          treatmentPlan: data.treatment_plan || null,
+          pendingHomework: data.pending_homework || [],
+        });
 
         addMessage({
           role: "assistant",
@@ -51,10 +65,10 @@ export function useChat(mode) {
 
         return data;
       } catch (e) {
-        setError("Could not reach the server. Is the backend running?");
+        setError("I couldn't complete that session request right now.");
         addMessage({
           role: "assistant",
-          content: "I'm having trouble connecting right now. Please check that the backend is running on port 8000.",
+          content: "I'm having trouble completing that request right now. Please try again in a moment.",
           timestamp: new Date().toISOString(),
           is_error: true,
         });
@@ -66,13 +80,19 @@ export function useChat(mode) {
   );
 
   const reset = useCallback(() => {
-    if (sessionId) api.deleteSession(sessionId).catch(() => {});
-      setMessages([]);
-      setSessionId(null);
-      setError(null);
-      setHomework(null);
-      setPreviousSummary(null);
-    }, [sessionId]);
+    setMessages([]);
+    setSessionId(null);
+    setError(null);
+    setHomework(null);
+    setPreviousSummary(null);
+    setSessionMeta({
+      isFirstSession: false,
+      sessionClosing: false,
+      sessionPhase: "opening",
+      treatmentPlan: null,
+      pendingHomework: [],
+    });
+  }, []);
 
-  return { messages, sessionId, loading, error, send, reset, homework, previousSummary };
+  return { messages, sessionId, loading, error, send, reset, homework, previousSummary, sessionMeta };
 }

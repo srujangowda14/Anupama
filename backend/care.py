@@ -62,15 +62,78 @@ def suggest_cbt_homework(distortion: str) -> tuple[str, str]:
 def summarize_session(*, mode: str, messages: list[dict], distortion: str | None, mood_score: int | None) -> str:
     user_messages = [m["content"] for m in messages if m["role"] == "user"]
     focus = user_messages[-1] if user_messages else "No user reflections captured yet."
+    themes = "; ".join(message for message in user_messages[:3]) if user_messages else "No personal history captured yet."
     bullets = [
         f"Mode: {mode}",
         f"Primary concern: {focus}",
+        f"Early themes and history: {themes}",
     ]
     if distortion and distortion != "none":
         bullets.append(f"Likely CBT pattern discussed: {distortion.replace('_', ' ')}")
     if mood_score:
         bullets.append(f"Ending mood signal: {mood_score}/5")
     return "\n".join(f"- {item}" for item in bullets)
+
+
+def build_treatment_plan(*, goals: list[str], session_count: int, pending_homework_count: int) -> dict:
+    target_sessions = max(4, min(10, (len(goals) * 2) + 4))
+    if session_count <= 1:
+        phase = "intake"
+    elif session_count >= target_sessions:
+        phase = "termination_review"
+    elif session_count >= max(target_sessions - 1, 3):
+        phase = "consolidation"
+    else:
+        phase = "active_treatment"
+
+    estimated_remaining = max(target_sessions - session_count, 0)
+    phase_titles = {
+        "intake": "Getting to know the person",
+        "active_treatment": "Active CBT work",
+        "consolidation": "Consolidating skills",
+        "termination_review": "Preparing for maintenance",
+    }
+    session_strategies = {
+        "intake": [
+            "Start with rapport, current stressors, supports, and therapy goals.",
+            "End with a shared understanding of who the user is and what to focus on next session.",
+        ],
+        "active_treatment": [
+            "Open with a mood check, brief bridge from last session, and homework review.",
+            "Set one agenda item, work it deeply, and finish with a small between-session practice.",
+        ],
+        "consolidation": [
+            "Review what tools have helped most and where the user still gets stuck.",
+            "Shift toward independence, relapse prevention, and flexible use of skills.",
+        ],
+        "termination_review": [
+            "Review gains, remaining concerns, and warning signs for setbacks.",
+            "Create a maintenance plan, decide on booster sessions, and define a confident ending point.",
+        ],
+    }
+    ending_signals = [
+        "Goals feel largely met or manageable.",
+        "The user can name and use helpful CBT tools without much prompting.",
+        "Homework is being completed with less resistance and more independence.",
+        "A relapse-prevention or maintenance plan can be stated clearly.",
+    ]
+
+    return {
+        "phase": phase,
+        "phase_title": phase_titles[phase],
+        "target_sessions": target_sessions,
+        "completed_sessions": session_count,
+        "estimated_sessions_remaining": estimated_remaining,
+        "pending_homework_count": pending_homework_count,
+        "should_plan_ending": phase in {"consolidation", "termination_review"},
+        "guidance": (
+            "Use this phase to review skills, identify what has improved, and create a relapse-prevention plan."
+            if phase in {"consolidation", "termination_review"}
+            else "Focus on one agenda item, collaborative restructuring, and a realistic between-session action plan."
+        ),
+        "session_strategy": session_strategies[phase],
+        "ending_signals": ending_signals,
+    }
 
 
 def next_checkin_due(now_iso: str) -> str:
