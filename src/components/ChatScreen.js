@@ -15,10 +15,11 @@ const OPENING_MESSAGES = {
   intake: "Hi, I’m Anupama in Intake Assistant mode. We can use this session to gather your story, what feels hardest lately, and what you want support with.",
 };
 
-export default function ChatScreen({ mode, profile, onSessionActivity, onOpenPage }) {
+export default function ChatScreen({ mode, profile, onSessionActivity, onOpenPage, onStartNextSession }) {
   const { messages, loading, send, homework, previousSummary, sessionMeta } = useChat(mode);
   const bottomRef = useRef(null);
   const meta = MODE_META[mode];
+  const sessionEnded = Boolean(sessionMeta.sessionClosing);
 
   useEffect(() => {
     bottomRef.current?.scrollIntoView({ behavior: "smooth" });
@@ -129,7 +130,24 @@ export default function ChatScreen({ mode, profile, onSessionActivity, onOpenPag
         <div ref={bottomRef} />
       </div>
 
-      <ChatInput onSend={handleSend} loading={loading} />
+      {sessionEnded && (
+        <div style={styles.endCap}>
+          <div style={styles.endCapTitle}>This session has wrapped up.</div>
+          <p style={styles.endCapText}>
+            The current session is closed so the next one can begin with fresh context, homework review, and a new agenda.
+          </p>
+          <div style={styles.endCapActions}>
+            <button style={styles.secondaryBtn} onClick={() => onOpenPage?.("homework")}>
+              Review homework
+            </button>
+            <button style={styles.primaryBtn} onClick={() => onStartNextSession?.(mode)}>
+              Start next session
+            </button>
+          </div>
+        </div>
+      )}
+
+      <ChatInput onSend={handleSend} loading={loading} disabled={sessionEnded} />
     </div>
   );
 }
@@ -263,5 +281,38 @@ const styles = {
     borderRadius: "50%",
     background: "#6B9E7A",
     display: "inline-block",
+  },
+  endCap: {
+    margin: "0 28px 18px",
+    padding: 18,
+    borderRadius: 18,
+    border: "1px solid rgba(107,158,122,0.22)",
+    background: "rgba(107,158,122,0.08)",
+  },
+  endCapTitle: {
+    fontFamily: "var(--font-display)",
+    fontSize: 18,
+    color: "var(--text-primary)",
+    marginBottom: 8,
+  },
+  endCapText: {
+    fontSize: 13,
+    color: "var(--text-secondary)",
+    lineHeight: 1.65,
+    marginBottom: 14,
+  },
+  endCapActions: {
+    display: "flex",
+    gap: 10,
+    flexWrap: "wrap",
+  },
+  primaryBtn: {
+    border: "none",
+    borderRadius: 14,
+    padding: "10px 16px",
+    background: "linear-gradient(135deg, #4E8A5E, #3A7050)",
+    color: "#fff",
+    fontSize: 13,
+    cursor: "pointer",
   },
 };

@@ -37,9 +37,9 @@ export default function ChatInput({ onSend, loading, disabled }) {
           value={value}
           onChange={(e) => setValue(e.target.value)}
           onKeyDown={handleKey}
-          placeholder="Share what's on your mind… (Enter to send)"
+          placeholder={disabled ? "This session is complete. Start a new session to continue." : "Share what's on your mind… (Enter to send)"}
           rows={1}
-          style={styles.textarea}
+          style={{ ...styles.textarea, opacity: disabled ? 0.7 : 1 }}
           disabled={disabled}
         />
         <button
@@ -74,7 +74,9 @@ export default function ChatInput({ onSend, loading, disabled }) {
           )}
         </button>
       </div>
-      <p style={styles.hint}>Shift + Enter for a new line</p>
+      <p style={styles.hint}>
+        {disabled ? "This input is locked because the session has ended." : "Shift + Enter for a new line"}
+      </p>
     </div>
   );
 }
