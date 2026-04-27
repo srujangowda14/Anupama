@@ -655,6 +655,15 @@ function HomeworkPage({ dashboard, onRefresh, onOpenSessions }) {
       <div style={styles.twoColGrid}>
         <div style={styles.panel}>
           <div style={styles.sectionTitle}>How homework is being used</div>
+          {dashboard?.homework_progress && (
+            <div style={styles.metricCard}>
+              <div style={{ fontFamily: "var(--font-display)", fontSize: 20, color: "var(--text-primary)" }}>
+                {dashboard.homework_progress.level.replace(/_/g, " ")}
+              </div>
+              <div style={styles.metricLabel}>current homework pace</div>
+              <p style={{ ...styles.panelText, marginTop: 10 }}>{dashboard.homework_progress.reason}</p>
+            </div>
+          )}
           <div style={styles.listBlock}>
             {(dashboard?.treatment_plan?.session_strategy || []).map((item) => (
               <div key={item} style={styles.bulletRow}>

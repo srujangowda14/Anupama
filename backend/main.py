@@ -11,10 +11,11 @@ from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel, Field
 
 from backend.care import (
+    assess_homework_progress,
     build_google_calendar_url,
     build_treatment_plan,
     next_checkin_due,
-    suggest_cbt_homework,
+    suggest_progress_based_cbt_homework,
     summarize_session,
 )
 from backend import store
@@ -141,6 +142,18 @@ SESSION_WRAP_READINESS_PATTERNS = [
     r"\bthis gives me something to work on\b",
 ]
 
+HOMEWORK_REFERENCE_PATTERNS = [
+    r"\bhomework\b",
+    r"\bassignment\b",
+    r"\bexercise\b",
+    r"\bworksheet\b",
+    r"\bthought record\b",
+    r"\bcontinuum\b",
+    r"\bevidence check\b",
+    r"\bprediction log\b",
+    r"\bbehavioral experiment\b",
+]
+
 
 def has_pattern(text: str, patterns: list[str]) -> bool:
     lowered = text.lower()
@@ -223,6 +236,27 @@ def build_memory_context(
         homework_titles = ", ".join(item["title"] for item in pending_homework[:3])
         sections.append(f"Open homework to review: {homework_titles}")
     return "\n\n".join(sections)
+
+
+def message_references_homework(message: str) -> bool:
+    return has_pattern(message, HOMEWORK_REFERENCE_PATTERNS)
+
+
+def build_homework_review_reply(message: str, pending_homework: list[dict]) -> str:
+    stripped = message.strip()
+    lowered = stripped.lower()
+    if any(token in lowered for token in ["not good", "rough", "hard", "overwhelmed", "anxious", "sad", "stressed"]):
+        opening = "I'm sorry it has been feeling that heavy."
+    elif any(token in lowered for token in ["better", "good", "okay", "fine"]):
+        opening = "I'm glad you checked in."
+    else:
+        opening = "Thanks for sharing that."
+
+    current_homework = pending_homework[0]["title"] if pending_homework else "the exercise from last time"
+    return (
+        f"{opening} Before we dive further into today, how did it go with {current_homework} from our last session? "
+        "What felt doable, and what got in the way if you weren't able to finish it?"
+    )
 
 
 def get_auth_user(authorization: str | None):
@@ -411,6 +445,10 @@ def dashboard(profile_id: str, authorization: str | None = Header(default=None))
         session_count=len(recent_sessions),
         pending_homework_count=len(pending_homework),
     )
+    homework_progress = assess_homework_progress(
+        homework_items=all_homework,
+        treatment_phase=treatment_plan["phase"],
+    )
     return {
         "profile": profile,
         "recent_sessions": recent_sessions,
@@ -418,6 +456,7 @@ def dashboard(profile_id: str, authorization: str | None = Header(default=None))
         "pending_homework": pending_homework,
         "all_homework": all_homework,
         "treatment_plan": treatment_plan,
+        "homework_progress": homework_progress,
     }
 
 
@@ -493,6 +532,7 @@ def chat(payload: ChatRequest, authorization: str | None = Header(default=None))
     if payload.session_id and not session_data:
         raise HTTPException(status_code=404, detail="Session not found")
 
+    is_new_session = session_data is None
     if session_data:
         session_id = session_data["id"]
     else:
@@ -529,7 +569,8 @@ def chat(payload: ChatRequest, authorization: str | None = Header(default=None))
     is_crisis = classification.crisis_label == "crisis" and explicit_self_harm
     conditioning_tokens = engine._build_cond_tokens(classification, payload.mode) if not is_crisis else []
     all_sessions = store.list_all_sessions(user_id)
-    pending_homework = store.list_pending_homework(user_id)
+    all_homework = store.list_all_homework(user_id)
+    pending_homework = [item for item in all_homework if item.get("status") in {"assigned", "in_progress"}]
     is_first_session = len(all_sessions) <= 1
     memory_context = build_memory_context(
         sessions=all_sessions,
@@ -540,6 +581,10 @@ def chat(payload: ChatRequest, authorization: str | None = Header(default=None))
         goals=profile.get("goals", []) or [],
         session_count=len(all_sessions),
         pending_homework_count=len(pending_homework),
+    )
+    homework_progress = assess_homework_progress(
+        homework_items=all_homework,
+        treatment_phase=treatment_plan["phase"],
     )
     session_phase = detect_session_phase(
         payload.mode,
@@ -558,6 +603,15 @@ def chat(payload: ChatRequest, authorization: str | None = Header(default=None))
         reply_text = engine.CRISIS_PROTOCOL
     elif violence_disclosure:
         reply_text = VIOLENCE_SAFETY_RESPONSE
+    elif (
+        payload.mode == "cbt"
+        and is_new_session
+        and not is_first_session
+        and pending_homework
+        and session_phase == "opening"
+        and not message_references_homework(payload.message)
+    ):
+        reply_text = build_homework_review_reply(payload.message, pending_homework)
     else:
         try:
             reply_text = generate_reply(
@@ -567,6 +621,7 @@ def chat(payload: ChatRequest, authorization: str | None = Header(default=None))
                 profile=profile,
                 memory_context=memory_context,
                 pending_homework=pending_homework,
+                homework_progress=homework_progress,
                 should_close_session=closing,
                 is_first_session=is_first_session,
                 session_phase=session_phase,
@@ -601,7 +656,11 @@ def chat(payload: ChatRequest, authorization: str | None = Header(default=None))
 
     homework_item = None
     if payload.mode == "cbt" and not is_crisis and closing and not is_first_session:
-        title, instructions = suggest_cbt_homework(classification.distortion)
+        title, instructions, homework_progress = suggest_progress_based_cbt_homework(
+            distortion=classification.distortion,
+            homework_items=all_homework,
+            treatment_phase=treatment_plan["phase"],
+        )
         homework_item = store.create_homework(
             profile_id=user_id,
             session_id=session_id,
@@ -635,6 +694,7 @@ def chat(payload: ChatRequest, authorization: str | None = Header(default=None))
         "crisis_label": classification.crisis_label,
         "conditioning_tokens": conditioning_tokens,
         "homework": homework_item,
+        "homework_progress": homework_progress,
         "previous_session_summary": memory_context,
         "pending_homework": pending_homework,
         "session_phase": session_phase,

@@ -59,6 +59,101 @@ def suggest_cbt_homework(distortion: str) -> tuple[str, str]:
     return CBT_HOMEWORK_BY_DISTORTION.get(distortion or "", DEFAULT_HOMEWORK)
 
 
+def assess_homework_progress(*, homework_items: list[dict], treatment_phase: str) -> dict:
+    recent_items = homework_items[:3]
+    pending_items = [item for item in recent_items if item.get("status") in {"assigned", "in_progress"}]
+    completed_items = [item for item in recent_items if item.get("status") == "completed"]
+    reflections = [
+        (item.get("reflection") or "").strip()
+        for item in completed_items
+        if (item.get("reflection") or "").strip()
+    ]
+    rich_reflections = [text for text in reflections if len(text) >= 40]
+    pending_titles = [item.get("title") for item in pending_items if item.get("title")]
+
+    if treatment_phase == "termination_review":
+        level = "maintenance"
+        reason = "Treatment is moving toward review and long-term maintenance."
+    elif treatment_phase == "consolidation" and len(completed_items) >= 1:
+        level = "consolidating"
+        reason = "The user is moving from active skill-building toward keeping gains and using tools independently."
+    elif len(pending_items) >= 2 and len(completed_items) == 0:
+        level = "stuck"
+        reason = "Several assignments are still open, so the next homework should be smaller and easier to complete."
+    elif len(pending_items) >= 1 and len(completed_items) == 0:
+        level = "starting"
+        reason = "The user has begun homework but has not yet completed one, so the next step should stay simple."
+    elif len(completed_items) >= 2 and len(rich_reflections) >= 1:
+        level = "advancing"
+        reason = "Recent homework is being completed with reflection, so the next exercise can go deeper."
+    elif len(completed_items) >= 1:
+        level = "engaged"
+        reason = "Homework has started to stick, so a standard assignment is appropriate."
+    else:
+        level = "starting"
+        reason = "There is not enough homework history yet, so the next assignment should stay concrete and low-friction."
+
+    return {
+        "level": level,
+        "reason": reason,
+        "recent_completed": len(completed_items),
+        "recent_pending": len(pending_items),
+        "pending_titles": pending_titles,
+        "has_reflection_depth": bool(rich_reflections),
+    }
+
+
+def suggest_progress_based_cbt_homework(
+    *,
+    distortion: str,
+    homework_items: list[dict],
+    treatment_phase: str,
+) -> tuple[str, str, dict]:
+    base_title, base_instructions = suggest_cbt_homework(distortion)
+    progress = assess_homework_progress(homework_items=homework_items, treatment_phase=treatment_phase)
+    level = progress["level"]
+    pending_titles = progress["pending_titles"]
+    pending_note = f" If it helps, revisit your earlier assignment ({pending_titles[0]}) instead of starting from scratch." if pending_titles else ""
+
+    if level == "stuck":
+        title = f"Micro {base_title.lower()}"
+        instructions = (
+            f"Do the smallest workable version of {base_title.lower()}: write just one real example from this week and respond to it in 2-3 sentences."
+            f"{pending_note} The goal is consistency, not perfection."
+        )
+    elif level == "starting":
+        title = base_title
+        instructions = (
+            f"{base_instructions} Keep it brief: one situation, one thought, and one balanced response is enough for this session."
+        )
+    elif level == "engaged":
+        title = base_title
+        instructions = (
+            f"{base_instructions} After you finish, add one sentence about what you noticed in your mood or behavior."
+        )
+    elif level == "advancing":
+        title = f"{base_title} + behavioral experiment"
+        instructions = (
+            f"{base_instructions} Then test the more balanced thought in one real situation before your next session and write what happened."
+        )
+    elif level == "consolidating":
+        title = f"{base_title} for maintenance"
+        instructions = (
+            f"{base_instructions} End by writing when this skill would be most important to reuse on your own in the future."
+        )
+    elif level == "maintenance":
+        title = "Relapse prevention practice"
+        instructions = (
+            "Write down one warning sign that tells you you're slipping back into an unhelpful pattern, "
+            "the CBT tool you want to use first, and who or what you can lean on if the pattern intensifies."
+        )
+    else:
+        title = base_title
+        instructions = base_instructions
+
+    return title, instructions, progress
+
+
 def summarize_session(*, mode: str, messages: list[dict], distortion: str | None, mood_score: int | None) -> str:
     user_messages = [m["content"] for m in messages if m["role"] == "user"]
     focus = user_messages[-1] if user_messages else "No user reflections captured yet."

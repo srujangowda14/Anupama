@@ -59,6 +59,7 @@ def generate_reply(
     profile: dict | None,
     memory_context: str | None,
     pending_homework: list[dict],
+    homework_progress: dict,
     should_close_session: bool,
     is_first_session: bool,
     session_phase: str,
@@ -82,6 +83,8 @@ def generate_reply(
         f"- user_goals: {', '.join(profile.get('goals', [])) if profile else 'none'}\n"
         f"- previous_session_context: {memory_context or 'none'}\n"
         f"- pending_homework: {', '.join(item['title'] for item in pending_homework) if pending_homework else 'none'}\n"
+        f"- homework_progress_level: {homework_progress.get('level', 'starting')}\n"
+        f"- homework_progress_reason: {homework_progress.get('reason', 'none')}\n"
         f"- should_close_session: {should_close_session}\n"
         f"- is_first_session: {is_first_session}\n"
         f"- session_phase: {session_phase}\n"
@@ -104,6 +107,8 @@ def generate_reply(
         "any cognitive reframe.\n"
         "If there is pending homework from a previous session, briefly ask about it near the start "
         "before moving into new coaching.\n"
+        "Match your between-session practice suggestions to homework progress: if the user seems stuck or overloaded, "
+        "make the next step smaller and easier; if they are engaged and reflective, you can be a bit more ambitious.\n"
         "When should_close_session is true, briefly summarize the key takeaway from this session, "
         "transition into an action plan for between sessions, check how realistic that plan feels, and end with a warm "
         "question about readiness for the next step.\n"
