@@ -1,4 +1,4 @@
-import React, { useCallback, useEffect, useMemo, useState } from "react";
+import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import ChatScreen from "./ChatScreen";
 import { api } from "../utils/api";
 import { supabase } from "../utils/supabase";
@@ -16,9 +16,66 @@ const MODE_OPTIONS = [
   { id: "intake", label: "Intake Assistant", icon: "📋" },
 ];
 
+const REMINDER_MINUTES = 30;
+
 function pageFromHash() {
   const raw = window.location.hash.replace("#", "");
   return NAV_ITEMS.some((item) => item.id === raw) ? raw : "chat";
+}
+
+function escapeIcsText(value = "") {
+  return value
+    .replace(/\\/g, "\\\\")
+    .replace(/\n/g, "\\n")
+    .replace(/,/g, "\\,")
+    .replace(/;/g, "\\;");
+}
+
+function toIcsTimestamp(value) {
+  return new Date(value).toISOString().replace(/[-:]/g, "").replace(/\.\d{3}Z$/, "Z");
+}
+
+function downloadInvite(schedule) {
+  const now = toIcsTimestamp(new Date().toISOString());
+  const ics = [
+    "BEGIN:VCALENDAR",
+    "VERSION:2.0",
+    "PRODID:-//Anupama//Session Invite//EN",
+    "CALSCALE:GREGORIAN",
+    "METHOD:PUBLISH",
+    "BEGIN:VEVENT",
+    `UID:${schedule.id}@anupama`,
+    `DTSTAMP:${now}`,
+    `DTSTART:${toIcsTimestamp(schedule.start_at)}`,
+    `DTEND:${toIcsTimestamp(schedule.end_at)}`,
+    `SUMMARY:${escapeIcsText(schedule.title)}`,
+    `DESCRIPTION:${escapeIcsText(schedule.description || "Follow-up session created from Anupama")}`,
+    "BEGIN:VALARM",
+    `TRIGGER:-PT${REMINDER_MINUTES}M`,
+    "ACTION:DISPLAY",
+    `DESCRIPTION:${escapeIcsText(`Reminder: ${schedule.title}`)}`,
+    "END:VALARM",
+    "END:VEVENT",
+    "END:VCALENDAR",
+  ].join("\r\n");
+
+  const blob = new Blob([ics], { type: "text/calendar;charset=utf-8" });
+  const url = window.URL.createObjectURL(blob);
+  const link = document.createElement("a");
+  link.href = url;
+  link.download = "invite.ics";
+  document.body.appendChild(link);
+  link.click();
+  document.body.removeChild(link);
+  window.URL.revokeObjectURL(url);
+}
+
+async function ensureNotificationPermission() {
+  if (!("Notification" in window)) return false;
+  if (Notification.permission === "granted") return true;
+  if (Notification.permission === "denied") return false;
+  const permission = await Notification.requestPermission();
+  return permission === "granted";
 }
 
 export default function WorkspaceShell({ profile, session, onProfileUpdate }) {
@@ -27,6 +84,7 @@ export default function WorkspaceShell({ profile, session, onProfileUpdate }) {
   const [chatSeed, setChatSeed] = useState(0);
   const [dashboard, setDashboard] = useState(null);
   const [loadingDashboard, setLoadingDashboard] = useState(false);
+  const reminderTimers = useRef([]);
 
   useEffect(() => {
     setMode(profile?.preferred_mode || "support");
@@ -58,6 +116,47 @@ export default function WorkspaceShell({ profile, session, onProfileUpdate }) {
   useEffect(() => {
     refreshDashboard();
   }, [refreshDashboard]);
+
+  useEffect(() => {
+    reminderTimers.current.forEach((timer) => window.clearTimeout(timer));
+    reminderTimers.current = [];
+
+    if (!dashboard?.upcoming_sessions?.length || !("Notification" in window) || Notification.permission !== "granted") {
+      return undefined;
+    }
+
+    const now = Date.now();
+    dashboard.upcoming_sessions.forEach((item) => {
+      const reminderKey = `anupama-reminder-${item.id}`;
+      if (window.localStorage.getItem(reminderKey)) return;
+
+      const reminderAt = new Date(item.start_at).getTime() - REMINDER_MINUTES * 60 * 1000;
+      const delay = reminderAt - now;
+
+      if (delay <= 0) {
+        if (new Date(item.start_at).getTime() > now) {
+          new Notification("Anupama session reminder", {
+            body: `${item.title} starts at ${new Date(item.start_at).toLocaleTimeString([], { hour: "numeric", minute: "2-digit" })}.`,
+          });
+          window.localStorage.setItem(reminderKey, "sent");
+        }
+        return;
+      }
+
+      const timer = window.setTimeout(() => {
+        new Notification("Anupama session reminder", {
+          body: `${item.title} starts in ${REMINDER_MINUTES} minutes.`,
+        });
+        window.localStorage.setItem(reminderKey, "sent");
+      }, delay);
+      reminderTimers.current.push(timer);
+    });
+
+    return () => {
+      reminderTimers.current.forEach((timer) => window.clearTimeout(timer));
+      reminderTimers.current = [];
+    };
+  }, [dashboard]);
 
   const goTo = (nextPage) => {
     window.location.hash = nextPage;
@@ -138,6 +237,7 @@ export default function WorkspaceShell({ profile, session, onProfileUpdate }) {
             profile={profile}
             onSessionActivity={refreshDashboard}
             onOpenPage={goTo}
+            onStartNextSession={startSession}
           />
         </section>
 
@@ -161,6 +261,8 @@ export default function WorkspaceShell({ profile, session, onProfileUpdate }) {
               loading={loadingDashboard}
               onRefresh={refreshDashboard}
               onStartSession={startSession}
+              onDownloadInvite={downloadInvite}
+              onEnsureReminderPermission={ensureNotificationPermission}
             />
           </section>
         )}
@@ -383,11 +485,12 @@ function ProfilePage({ profile, accountEmail, dashboard, onProfileUpdate, onRefr
   );
 }
 
-function SessionsPage({ profile, dashboard, loading, onRefresh, onStartSession }) {
+function SessionsPage({ profile, dashboard, loading, onRefresh, onStartSession, onDownloadInvite, onEnsureReminderPermission }) {
   const [title, setTitle] = useState("Follow-up Anupama session");
   const [date, setDate] = useState("");
   const [time, setTime] = useState("");
   const [scheduling, setScheduling] = useState(false);
+  const [downloadedInvite, setDownloadedInvite] = useState(false);
 
   const createSchedule = async () => {
     if (!profile?.id || !date || !time) return;
@@ -395,13 +498,17 @@ function SessionsPage({ profile, dashboard, loading, onRefresh, onStartSession }
     try {
       const startAt = new Date(`${date}T${time}`).toISOString();
       const endAt = new Date(new Date(startAt).getTime() + 30 * 60 * 1000).toISOString();
-      await api.scheduleSession(profile.id, {
+      const result = await api.scheduleSession(profile.id, {
         title,
         description: "Follow-up session created from Anupama",
         start_at: startAt,
         end_at: endAt,
         timezone: Intl.DateTimeFormat().resolvedOptions().timeZone,
       });
+      onDownloadInvite?.(result.schedule);
+      await onEnsureReminderPermission?.();
+      setDownloadedInvite(true);
+      window.setTimeout(() => setDownloadedInvite(false), 2000);
       setDate("");
       setTime("");
       onRefresh();
@@ -480,8 +587,9 @@ function SessionsPage({ profile, dashboard, loading, onRefresh, onStartSession }
             </label>
           </div>
           <button onClick={createSchedule} style={styles.primaryBtn} disabled={scheduling || !date || !time}>
-            {scheduling ? "Creating..." : "Add to Google Calendar"}
+            {scheduling ? "Creating..." : "Add to calendar"}
           </button>
+          {downloadedInvite && <div style={styles.successNote}>invite.ics downloaded and reminder armed.</div>}
         </div>
       </div>
 
@@ -490,10 +598,18 @@ function SessionsPage({ profile, dashboard, loading, onRefresh, onStartSession }
           <div style={styles.sectionTitle}>Upcoming sessions</div>
           {dashboard?.upcoming_sessions?.length ? (
             dashboard.upcoming_sessions.map((item) => (
-              <a key={item.id} href={item.calendar_url} target="_blank" rel="noreferrer" style={styles.sessionCard}>
+              <div key={item.id} style={styles.sessionCardStatic}>
                 <div style={styles.sessionTitle}>{item.title}</div>
                 <div style={styles.sessionMeta}>{new Date(item.start_at).toLocaleString()}</div>
-              </a>
+                <div style={styles.actionRow}>
+                  <a href={item.calendar_url} target="_blank" rel="noreferrer" style={styles.inlineLinkBtn}>
+                    Open Google Calendar
+                  </a>
+                  <button onClick={() => onDownloadInvite?.(item)} style={styles.secondaryWideBtn}>
+                    Download invite.ics
+                  </button>
+                </div>
+              </div>
             ))
           ) : (
             <p style={styles.panelText}>No follow-up is scheduled yet.</p>
@@ -938,6 +1054,18 @@ const styles = {
     padding: 16,
     background: "rgba(255,255,255,0.03)",
     marginBottom: 12,
+  },
+  inlineLinkBtn: {
+    display: "inline-flex",
+    alignItems: "center",
+    justifyContent: "center",
+    textDecoration: "none",
+    borderRadius: 14,
+    padding: "12px 18px",
+    background: "rgba(255,255,255,0.03)",
+    border: "1px solid var(--border-subtle)",
+    color: "var(--text-primary)",
+    fontSize: 14,
   },
   sessionCardStatic: {
     borderRadius: 16,
