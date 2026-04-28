@@ -2,6 +2,7 @@ import React, { useEffect, useRef } from "react";
 import { useChat } from "../hooks/useChat";
 import ChatMessage from "./ChatMessage";
 import ChatInput from "./ChatInput";
+import { useIsMobile } from "../hooks/useIsMobile";
 
 const MODE_META = {
   support: { icon: "🌿", label: "Support Buddy", color: "#6B9E7A" },
@@ -16,6 +17,7 @@ const OPENING_MESSAGES = {
 };
 
 export default function ChatScreen({ mode, profile, onSessionActivity, onOpenPage, onStartNextSession }) {
+  const isMobile = useIsMobile();
   const { messages, loading, send, homework, previousSummary, sessionMeta } = useChat(mode);
   const bottomRef = useRef(null);
   const meta = MODE_META[mode];
@@ -45,10 +47,10 @@ export default function ChatScreen({ mode, profile, onSessionActivity, onOpenPag
 
   return (
     <div style={styles.root}>
-      <header style={styles.header}>
+      <header style={{ ...styles.header, flexDirection: isMobile ? "column" : "row", padding: isMobile ? "18px 16px 14px" : "24px 28px 18px" }}>
         <div>
           <div style={styles.eyebrow}>Session Workspace</div>
-          <div style={styles.headerTitle}>
+          <div style={{ ...styles.headerTitle, fontSize: isMobile ? 20 : 22 }}>
             <span style={{ fontSize: 20 }}>{meta.icon}</span>
             <span>{meta.label}</span>
           </div>
@@ -66,8 +68,8 @@ export default function ChatScreen({ mode, profile, onSessionActivity, onOpenPag
         </div>
       </header>
 
-      <div style={styles.contextGrid}>
-        <div style={styles.contextCard}>
+      <div style={{ ...styles.contextGrid, gridTemplateColumns: isMobile ? "1fr" : styles.contextGrid.gridTemplateColumns, padding: isMobile ? "14px 16px 0" : "18px 28px 0" }}>
+        <div style={{ ...styles.contextCard, padding: isMobile ? 14 : 16 }}>
           <div style={styles.contextTitle}>Current phase</div>
           <div style={{ ...styles.phaseBadge, borderColor: `${meta.color}55`, color: meta.color }}>
             {sessionMeta.sessionPhase === "closing"
@@ -88,7 +90,7 @@ export default function ChatScreen({ mode, profile, onSessionActivity, onOpenPag
         </div>
 
         {previousSummary && (
-          <div style={styles.contextCard}>
+          <div style={{ ...styles.contextCard, padding: isMobile ? 14 : 16 }}>
             <div style={styles.contextTitle}>Prior context in memory</div>
             <p style={styles.contextText}>
               {previousSummary.length > 280 ? `${previousSummary.slice(0, 280)}…` : previousSummary}
@@ -97,7 +99,7 @@ export default function ChatScreen({ mode, profile, onSessionActivity, onOpenPag
         )}
 
         {homework && (
-          <div style={styles.contextCard}>
+          <div style={{ ...styles.contextCard, padding: isMobile ? 14 : 16 }}>
             <div style={styles.contextTitle}>Assigned for next time</div>
             <div style={styles.homeworkTitle}>{homework.title}</div>
             <p style={styles.contextText}>{homework.instructions}</p>
@@ -105,7 +107,7 @@ export default function ChatScreen({ mode, profile, onSessionActivity, onOpenPag
         )}
       </div>
 
-      <div style={styles.messages}>
+      <div style={{ ...styles.messages, padding: isMobile ? "18px 16px 8px" : "24px 28px 8px" }}>
         {allMessages.map((msg) => (
           <ChatMessage key={msg.id} msg={msg} />
         ))}
@@ -131,7 +133,7 @@ export default function ChatScreen({ mode, profile, onSessionActivity, onOpenPag
       </div>
 
       {sessionEnded && (
-        <div style={styles.endCap}>
+        <div style={{ ...styles.endCap, margin: isMobile ? "0 16px 14px" : "0 28px 18px", padding: isMobile ? 16 : 18 }}>
           <div style={styles.endCapTitle}>This session has wrapped up.</div>
           <p style={styles.endCapText}>
             The current session is closed so the next one can begin with fresh context, homework review, and a new agenda.
@@ -147,7 +149,7 @@ export default function ChatScreen({ mode, profile, onSessionActivity, onOpenPag
         </div>
       )}
 
-      <ChatInput onSend={handleSend} loading={loading} disabled={sessionEnded} />
+      <ChatInput onSend={handleSend} loading={loading} disabled={sessionEnded} compact={isMobile} />
     </div>
   );
 }

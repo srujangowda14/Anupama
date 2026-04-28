@@ -2,6 +2,7 @@ import React, { useCallback, useEffect, useMemo, useRef, useState } from "react"
 import ChatScreen from "./ChatScreen";
 import { api } from "../utils/api";
 import { supabase } from "../utils/supabase";
+import { useIsMobile } from "../hooks/useIsMobile";
 
 const NAV_ITEMS = [
   { id: "chat", label: "Chat" },
@@ -79,6 +80,7 @@ async function ensureNotificationPermission() {
 }
 
 export default function WorkspaceShell({ profile, session, onProfileUpdate }) {
+  const isMobile = useIsMobile();
   const [page, setPage] = useState(pageFromHash());
   const [mode, setMode] = useState(profile?.preferred_mode || "support");
   const [chatSeed, setChatSeed] = useState(0);
@@ -176,8 +178,17 @@ export default function WorkspaceShell({ profile, session, onProfileUpdate }) {
   }, [dashboard]);
 
   return (
-    <div style={styles.root}>
-      <aside style={styles.sidebar}>
+    <div style={{ ...styles.root, flexDirection: isMobile ? "column" : "row" }}>
+      <aside
+        style={{
+          ...styles.sidebar,
+          width: isMobile ? "100%" : 280,
+          borderRight: isMobile ? "none" : "1px solid var(--border-subtle)",
+          borderBottom: isMobile ? "1px solid var(--border-subtle)" : "none",
+          padding: isMobile ? 16 : 22,
+          gap: isMobile ? 12 : 18,
+        }}
+      >
         <div style={styles.brandBlock}>
           <div style={styles.logo}>🌿</div>
           <div>
@@ -186,7 +197,13 @@ export default function WorkspaceShell({ profile, session, onProfileUpdate }) {
           </div>
         </div>
 
-        <div style={styles.navList}>
+        <div
+          style={{
+            ...styles.navList,
+            display: "grid",
+            gridTemplateColumns: isMobile ? "repeat(4, minmax(0, 1fr))" : "1fr",
+          }}
+        >
           {NAV_ITEMS.map((item) => (
             <button
               key={item.id}
@@ -195,6 +212,9 @@ export default function WorkspaceShell({ profile, session, onProfileUpdate }) {
                 ...styles.navButton,
                 background: page === item.id ? "rgba(107,158,122,0.16)" : "transparent",
                 color: page === item.id ? "#6B9E7A" : "var(--text-secondary)",
+                textAlign: isMobile ? "center" : "left",
+                padding: isMobile ? "10px 8px" : "12px 14px",
+                fontSize: isMobile ? 12 : 14,
               }}
             >
               {item.label}
@@ -202,7 +222,7 @@ export default function WorkspaceShell({ profile, session, onProfileUpdate }) {
           ))}
         </div>
 
-        <div style={styles.sidebarCard}>
+        <div style={{ ...styles.sidebarCard, padding: isMobile ? 14 : 16 }}>
           <div style={styles.sidebarLabel}>Treatment phase</div>
           <div style={styles.phaseTitle}>{dashboard?.treatment_plan?.phase_title || "Getting started"}</div>
           <p style={styles.sidebarText}>
@@ -210,7 +230,7 @@ export default function WorkspaceShell({ profile, session, onProfileUpdate }) {
           </p>
         </div>
 
-        <div style={styles.sidebarCard}>
+        <div style={{ ...styles.sidebarCard, padding: isMobile ? 14 : 16 }}>
           <div style={styles.sidebarLabel}>Quick start</div>
           {MODE_OPTIONS.map((option) => (
             <button
@@ -224,7 +244,13 @@ export default function WorkspaceShell({ profile, session, onProfileUpdate }) {
           ))}
         </div>
 
-        <a href="tel:988" style={styles.crisisBtn}>
+        <a
+          href="tel:988"
+          style={{
+            ...styles.crisisBtn,
+            marginTop: isMobile ? 0 : "auto",
+          }}
+        >
           🆘 988 Crisis Line
         </a>
       </aside>
@@ -278,7 +304,16 @@ export default function WorkspaceShell({ profile, session, onProfileUpdate }) {
         )}
 
         {page === "profile" && welcomeSummary && (
-          <div style={styles.floatingNote}>
+          <div
+            style={{
+              ...styles.floatingNote,
+              position: isMobile ? "static" : "absolute",
+              width: isMobile ? "auto" : 300,
+              margin: isMobile ? "0 16px 20px" : 0,
+              right: isMobile ? "auto" : 24,
+              bottom: isMobile ? "auto" : 24,
+            }}
+          >
             <div style={styles.sidebarLabel}>What Anupama understands so far</div>
             <p style={styles.sidebarText}>{welcomeSummary}</p>
           </div>
@@ -289,6 +324,7 @@ export default function WorkspaceShell({ profile, session, onProfileUpdate }) {
 }
 
 function ProfilePage({ profile, accountEmail, dashboard, onProfileUpdate, onRefresh }) {
+  const isMobile = useIsMobile();
   const [name, setName] = useState(profile?.name || "");
   const [dateOfBirth, setDateOfBirth] = useState(profile?.date_of_birth || "");
   const [gender, setGender] = useState(profile?.gender || "prefer_not_to_say");
@@ -352,21 +388,21 @@ function ProfilePage({ profile, accountEmail, dashboard, onProfileUpdate, onRefr
   };
 
   return (
-    <div style={styles.pageContent}>
-      <div style={styles.pageHeader}>
+    <div style={{ ...styles.pageContent, padding: isMobile ? "18px 16px 28px" : styles.pageContent.padding }}>
+      <div style={{ ...styles.pageHeader, flexDirection: isMobile ? "column" : "row" }}>
         <div>
           <div style={styles.pageEyebrow}>Profile</div>
-          <h1 style={styles.pageTitle}>Your care profile</h1>
+          <h1 style={{ ...styles.pageTitle, fontSize: isMobile ? 28 : 34 }}>Your care profile</h1>
           <p style={styles.pageDescription}>
             Keep the basics stable here so Anupama can remember who you are, what support you want, and how treatment should be paced over time.
           </p>
         </div>
       </div>
 
-      <div style={styles.twoColGrid}>
-        <div style={styles.panel}>
+      <div style={{ ...styles.twoColGrid, gridTemplateColumns: isMobile ? "1fr" : styles.twoColGrid.gridTemplateColumns }}>
+        <div style={{ ...styles.panel, padding: isMobile ? 16 : styles.panel.padding }}>
           <div style={styles.sectionTitle}>Account basics</div>
-          <div style={styles.formGrid}>
+          <div style={{ ...styles.formGrid, gridTemplateColumns: isMobile ? "1fr" : styles.formGrid.gridTemplateColumns }}>
             <label style={styles.labelBlock}>
               <span style={styles.label}>Name</span>
               <input style={styles.input} value={name} onChange={(e) => setName(e.target.value)} />
@@ -440,7 +476,7 @@ function ProfilePage({ profile, accountEmail, dashboard, onProfileUpdate, onRefr
           </div>
         </div>
 
-        <div style={styles.panel}>
+        <div style={{ ...styles.panel, padding: isMobile ? 16 : styles.panel.padding }}>
           <div style={styles.sectionTitle}>Treatment picture</div>
           <div style={styles.metricCard}>
             <div style={styles.metricValue}>{dashboard?.treatment_plan?.completed_sessions || 0}</div>
@@ -486,6 +522,7 @@ function ProfilePage({ profile, accountEmail, dashboard, onProfileUpdate, onRefr
 }
 
 function SessionsPage({ profile, dashboard, loading, onRefresh, onStartSession, onDownloadInvite, onEnsureReminderPermission }) {
+  const isMobile = useIsMobile();
   const [title, setTitle] = useState("Follow-up Anupama session");
   const [date, setDate] = useState("");
   const [time, setTime] = useState("");
@@ -518,11 +555,11 @@ function SessionsPage({ profile, dashboard, loading, onRefresh, onStartSession, 
   };
 
   return (
-    <div style={styles.pageContent}>
-      <div style={styles.pageHeader}>
+    <div style={{ ...styles.pageContent, padding: isMobile ? "18px 16px 28px" : styles.pageContent.padding }}>
+      <div style={{ ...styles.pageHeader, flexDirection: isMobile ? "column" : "row" }}>
         <div>
           <div style={styles.pageEyebrow}>Sessions</div>
-          <h1 style={styles.pageTitle}>Your session arc</h1>
+          <h1 style={{ ...styles.pageTitle, fontSize: isMobile ? 28 : 34 }}>Your session arc</h1>
           <p style={styles.pageDescription}>
             CBT works best when sessions have an opening, a focused middle, and a closing action plan. This page keeps track of what has happened, what comes next, and when treatment should start winding down.
           </p>
@@ -532,8 +569,8 @@ function SessionsPage({ profile, dashboard, loading, onRefresh, onStartSession, 
         </button>
       </div>
 
-      <div style={styles.twoColGrid}>
-        <div style={styles.panel}>
+      <div style={{ ...styles.twoColGrid, gridTemplateColumns: isMobile ? "1fr" : styles.twoColGrid.gridTemplateColumns }}>
+        <div style={{ ...styles.panel, padding: isMobile ? 16 : styles.panel.padding }}>
           <div style={styles.sectionTitle}>Treatment roadmap</div>
           <div style={styles.metricGrid}>
             <div style={styles.metricCard}>
@@ -560,9 +597,9 @@ function SessionsPage({ profile, dashboard, loading, onRefresh, onStartSession, 
           </div>
         </div>
 
-        <div style={styles.panel}>
+        <div style={{ ...styles.panel, padding: isMobile ? 16 : styles.panel.padding }}>
           <div style={styles.sectionTitle}>Start a new session</div>
-          <div style={styles.quickGrid}>
+          <div style={{ ...styles.quickGrid, gridTemplateColumns: isMobile ? "1fr" : styles.quickGrid.gridTemplateColumns }}>
             {MODE_OPTIONS.map((option) => (
               <button key={option.id} onClick={() => onStartSession(option.id)} style={styles.modeCard}>
                 <span style={{ fontSize: 22 }}>{option.icon}</span>
@@ -576,7 +613,7 @@ function SessionsPage({ profile, dashboard, loading, onRefresh, onStartSession, 
             <span style={styles.label}>Session title</span>
             <input style={styles.input} value={title} onChange={(e) => setTitle(e.target.value)} />
           </label>
-          <div style={styles.formGrid}>
+          <div style={{ ...styles.formGrid, gridTemplateColumns: isMobile ? "1fr" : styles.formGrid.gridTemplateColumns }}>
             <label style={styles.labelBlock}>
               <span style={styles.label}>Date</span>
               <input style={styles.input} type="date" value={date} onChange={(e) => setDate(e.target.value)} />
@@ -593,8 +630,8 @@ function SessionsPage({ profile, dashboard, loading, onRefresh, onStartSession, 
         </div>
       </div>
 
-      <div style={styles.twoColGrid}>
-        <div style={styles.panel}>
+      <div style={{ ...styles.twoColGrid, gridTemplateColumns: isMobile ? "1fr" : styles.twoColGrid.gridTemplateColumns }}>
+        <div style={{ ...styles.panel, padding: isMobile ? 16 : styles.panel.padding }}>
           <div style={styles.sectionTitle}>Upcoming sessions</div>
           {dashboard?.upcoming_sessions?.length ? (
             dashboard.upcoming_sessions.map((item) => (
@@ -616,7 +653,7 @@ function SessionsPage({ profile, dashboard, loading, onRefresh, onStartSession, 
           )}
         </div>
 
-        <div style={styles.panel}>
+        <div style={{ ...styles.panel, padding: isMobile ? 16 : styles.panel.padding }}>
           <div style={styles.sectionTitle}>Session history</div>
           {dashboard?.recent_sessions?.length ? (
             dashboard.recent_sessions.map((item) => (
@@ -638,22 +675,23 @@ function SessionsPage({ profile, dashboard, loading, onRefresh, onStartSession, 
 }
 
 function HomeworkPage({ dashboard, onRefresh, onOpenSessions }) {
+  const isMobile = useIsMobile();
   const homeworkItems = dashboard?.all_homework || [];
 
   return (
-    <div style={styles.pageContent}>
-      <div style={styles.pageHeader}>
+    <div style={{ ...styles.pageContent, padding: isMobile ? "18px 16px 28px" : styles.pageContent.padding }}>
+      <div style={{ ...styles.pageHeader, flexDirection: isMobile ? "column" : "row" }}>
         <div>
           <div style={styles.pageEyebrow}>Homework</div>
-          <h1 style={styles.pageTitle}>Between-session practice</h1>
+          <h1 style={{ ...styles.pageTitle, fontSize: isMobile ? 28 : 34 }}>Between-session practice</h1>
           <p style={styles.pageDescription}>
             Homework starts after the first session. It is used to carry one focused CBT skill between sessions, then checked near the start of the next one.
           </p>
         </div>
       </div>
 
-      <div style={styles.twoColGrid}>
-        <div style={styles.panel}>
+      <div style={{ ...styles.twoColGrid, gridTemplateColumns: isMobile ? "1fr" : styles.twoColGrid.gridTemplateColumns }}>
+        <div style={{ ...styles.panel, padding: isMobile ? 16 : styles.panel.padding }}>
           <div style={styles.sectionTitle}>How homework is being used</div>
           {dashboard?.homework_progress && (
             <div style={styles.metricCard}>
@@ -677,7 +715,7 @@ function HomeworkPage({ dashboard, onRefresh, onOpenSessions }) {
           </button>
         </div>
 
-        <div style={styles.panel}>
+        <div style={{ ...styles.panel, padding: isMobile ? 16 : styles.panel.padding }}>
           <div style={styles.sectionTitle}>Pending homework</div>
           {dashboard?.pending_homework?.length ? (
             dashboard.pending_homework.map((item) => (
@@ -689,7 +727,7 @@ function HomeworkPage({ dashboard, onRefresh, onOpenSessions }) {
         </div>
       </div>
 
-      <div style={styles.panel}>
+      <div style={{ ...styles.panel, padding: isMobile ? 16 : styles.panel.padding }}>
         <div style={styles.sectionTitle}>All assignments</div>
         {homeworkItems.length ? (
           homeworkItems.map((item) => <HomeworkCard key={item.id} item={item} onRefresh={onRefresh} compact={item.status === "completed"} />)
@@ -852,11 +890,11 @@ const styles = {
   main: {
     flex: 1,
     minWidth: 0,
-    minHeight: "100vh",
+    minHeight: 0,
     position: "relative",
   },
   pageSection: {
-    height: "100vh",
+    minHeight: "100%",
     overflowY: "auto",
     flexDirection: "column",
   },

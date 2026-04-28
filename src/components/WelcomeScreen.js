@@ -1,4 +1,5 @@
 import React, { useEffect, useState } from "react";
+import { useIsMobile } from "../hooks/useIsMobile";
 
 const MODES = [
   {
@@ -25,6 +26,7 @@ const MODES = [
 ];
 
 export default function WelcomeScreen({ onStart, profile, accountEmail }) {
+  const isMobile = useIsMobile();
   const [selected, setSelected] = useState("support");
   const [name, setName] = useState(profile?.name || "");
   const [email, setEmail] = useState(profile?.email || accountEmail || "");
@@ -64,18 +66,18 @@ export default function WelcomeScreen({ onStart, profile, accountEmail }) {
   };
 
   return (
-    <div style={styles.root}>
+    <div style={{ ...styles.root, alignItems: isMobile ? "flex-start" : "center", padding: isMobile ? "18px 14px 28px" : "24px" }}>
       {/* Ambient glow */}
       <div style={styles.glow} />
 
-      <div style={styles.card} className="fade-up">
+      <div style={{ ...styles.card, maxWidth: isMobile ? "100%" : 560, paddingTop: isMobile ? 12 : 0 }} className="fade-up">
         {/* Avatar */}
         <div style={styles.avatarWrap}>
           <div style={styles.avatar}>🌿</div>
           <div style={styles.avatarRing} />
         </div>
 
-        <h1 style={styles.title}>Anupama</h1>
+        <h1 style={{ ...styles.title, fontSize: isMobile ? 32 : 40 }}>Anupama</h1>
         <p style={styles.subtitle}>
           A safe space to be heard — powered by a model trained entirely from scratch.
         </p>
@@ -128,7 +130,7 @@ export default function WelcomeScreen({ onStart, profile, accountEmail }) {
 
         {/* Mode picker */}
         <p style={styles.pickLabel}>Choose your session type</p>
-        <div style={styles.modeGrid}>
+        <div style={{ ...styles.modeGrid, flexDirection: isMobile ? "column" : "row" }}>
           {MODES.map((m) => (
             <button
               key={m.id}

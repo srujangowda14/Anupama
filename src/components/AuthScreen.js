@@ -1,7 +1,9 @@
 import React, { useState } from "react";
 import { supabase } from "../utils/supabase";
+import { useIsMobile } from "../hooks/useIsMobile";
 
 export default function AuthScreen() {
+  const isMobile = useIsMobile();
   const [mode, setMode] = useState("signin");
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
@@ -34,10 +36,10 @@ export default function AuthScreen() {
   };
 
   return (
-    <div style={styles.root}>
-      <div style={styles.card}>
+    <div style={{ ...styles.root, alignItems: isMobile ? "flex-start" : "center", padding: isMobile ? 16 : 24 }}>
+      <div style={{ ...styles.card, maxWidth: isMobile ? "100%" : 440, padding: isMobile ? 22 : 28, marginTop: isMobile ? 18 : 0 }}>
         <div style={styles.logo}>🌿</div>
-        <h1 style={styles.title}>Anupama</h1>
+        <h1 style={{ ...styles.title, fontSize: isMobile ? 30 : 34 }}>Anupama</h1>
         <p style={styles.subtitle}>A CBT-focused support companion with account-based continuity.</p>
 
         <div style={styles.toggle}>

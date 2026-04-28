@@ -1,6 +1,6 @@
 import React, { useState, useRef, useEffect } from "react";
 
-export default function ChatInput({ onSend, loading, disabled }) {
+export default function ChatInput({ onSend, loading, disabled, compact = false }) {
   const [value, setValue] = useState("");
   const ref = useRef(null);
 
@@ -25,11 +25,12 @@ export default function ChatInput({ onSend, loading, disabled }) {
   const canSend = value.trim().length > 0 && !loading && !disabled;
 
   return (
-    <div style={styles.root}>
+    <div style={{ ...styles.root, padding: compact ? "0 12px 14px" : styles.root.padding }}>
       <div
         style={{
           ...styles.inputWrap,
           borderColor: value ? "rgba(107,158,122,0.35)" : "var(--border-subtle)",
+          padding: compact ? "8px 8px 8px 10px" : styles.inputWrap.padding,
         }}
       >
         <textarea
@@ -39,7 +40,7 @@ export default function ChatInput({ onSend, loading, disabled }) {
           onKeyDown={handleKey}
           placeholder={disabled ? "This session is complete. Start a new session to continue." : "Share what's on your mind… (Enter to send)"}
           rows={1}
-          style={{ ...styles.textarea, opacity: disabled ? 0.7 : 1 }}
+          style={{ ...styles.textarea, opacity: disabled ? 0.7 : 1, fontSize: compact ? 16 : styles.textarea.fontSize }}
           disabled={disabled}
         />
         <button
@@ -47,6 +48,8 @@ export default function ChatInput({ onSend, loading, disabled }) {
           disabled={!canSend}
           style={{
             ...styles.sendBtn,
+            width: compact ? 40 : styles.sendBtn.width,
+            height: compact ? 40 : styles.sendBtn.height,
             background: canSend
               ? "linear-gradient(135deg, #4E8A5E, #3A7050)"
               : "rgba(255,255,255,0.06)",

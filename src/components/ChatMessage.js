@@ -1,4 +1,5 @@
 import React from "react";
+import { useIsMobile } from "../hooks/useIsMobile";
 
 const DISTORTION_COLORS = {
   catastrophizing:       "#C06A50",
@@ -37,6 +38,7 @@ function MetaBadge({ label, value, color }) {
 }
 
 export default function ChatMessage({ msg }) {
+  const isMobile = useIsMobile();
   const isUser = msg.role === "user";
   const isCrisis = msg.is_crisis;
   const isError = msg.is_error;
@@ -60,8 +62,8 @@ export default function ChatMessage({ msg }) {
       {!isUser && (
         <div
           style={{
-            width: 32,
-            height: 32,
+            width: isMobile ? 28 : 32,
+            height: isMobile ? 28 : 32,
             borderRadius: "50%",
             background: isCrisis
               ? "linear-gradient(135deg, #6B2020, #4A1010)"
@@ -72,14 +74,14 @@ export default function ChatMessage({ msg }) {
             justifyContent: "center",
             fontSize: 14,
             flexShrink: 0,
-            marginBottom: 20,
+            marginBottom: isMobile ? 18 : 20,
           }}
         >
           {isCrisis ? "🆘" : "🌿"}
         </div>
       )}
 
-      <div style={{ maxWidth: "70%", minWidth: 60 }}>
+      <div style={{ maxWidth: isMobile ? "84%" : "70%", minWidth: isMobile ? 0 : 60 }}>
         {/* Bubble */}
         <div
           style={{
@@ -100,8 +102,8 @@ export default function ChatMessage({ msg }) {
             borderRadius: isUser
               ? "18px 18px 4px 18px"
               : "18px 18px 18px 4px",
-            padding: "12px 16px",
-            fontSize: 14,
+            padding: isMobile ? "11px 13px" : "12px 16px",
+            fontSize: isMobile ? 15 : 14,
             color: "var(--text-primary)",
             lineHeight: 1.7,
             whiteSpace: "pre-wrap",
