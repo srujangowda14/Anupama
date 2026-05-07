@@ -2,7 +2,7 @@ import React, { useState } from "react";
 import { supabase } from "../utils/supabase";
 import { useIsMobile } from "../hooks/useIsMobile";
 
-export default function AuthScreen() {
+export default function AuthScreen({ notice = null }) {
   const isMobile = useIsMobile();
   const [mode, setMode] = useState("signin");
   const [email, setEmail] = useState("");
@@ -69,6 +69,7 @@ export default function AuthScreen() {
           Continue with Google
         </button>
 
+        {notice && <p style={styles.notice}>{notice}</p>}
         {error && <p style={styles.error}>{error}</p>}
         <p style={styles.caption}>Passwords are handled securely by Supabase Auth and are never stored by the app itself.</p>
       </div>
@@ -127,6 +128,12 @@ const styles = {
     color: "var(--text-primary)",
     fontSize: 14,
     marginTop: 10,
+  },
+  notice: {
+    fontSize: 12,
+    color: "#C8944A",
+    marginTop: 10,
+    lineHeight: 1.5,
   },
   error: { fontSize: 12, color: "#C87A7A", marginTop: 10 },
   caption: { fontSize: 11, color: "var(--text-muted)", marginTop: 12, lineHeight: 1.5 },

@@ -4,22 +4,68 @@ import WelcomeScreen from "./components/WelcomeScreen";
 import AuthScreen from "./components/AuthScreen";
 import WorkspaceShell from "./components/WorkspaceShell";
 import { api } from "./utils/api";
-import { supabase } from "./utils/supabase";
+import {
+  clearSessionStarted,
+  ensureSessionStarted,
+  getRemainingSessionMs,
+  hasSessionExpired,
+  markSessionStarted,
+  supabase,
+} from "./utils/supabase";
 
 export default function App() {
   const [profile, setProfile] = useState(null);
   const [session, setSession] = useState(null);
   const [loadingProfile, setLoadingProfile] = useState(true);
+  const [authNotice, setAuthNotice] = useState(null);
 
   useEffect(() => {
     let active = true;
+    let expiryTimer = null;
 
-    const loadForSession = async (nextSession) => {
+    const expireSession = async () => {
+      clearSessionStarted();
+      setAuthNotice("Your session expired after 2 hours. Please sign in again.");
+      await supabase.auth.signOut();
+    };
+
+    const scheduleExpiry = () => {
+      if (expiryTimer) {
+        window.clearTimeout(expiryTimer);
+      }
+      const remaining = getRemainingSessionMs();
+      expiryTimer = window.setTimeout(() => {
+        expireSession();
+      }, remaining);
+    };
+
+    const loadForSession = async (nextSession, authEvent = null) => {
       if (!active) return;
       setLoadingProfile(true);
+
+      if (!nextSession) {
+        clearSessionStarted();
+      } else if (authEvent === "SIGNED_IN") {
+        markSessionStarted();
+        setAuthNotice(null);
+      } else {
+        ensureSessionStarted();
+      }
+
+      if (nextSession && hasSessionExpired()) {
+        await expireSession();
+        if (active) {
+          setProfile(null);
+          setSession(null);
+          setLoadingProfile(false);
+        }
+        return;
+      }
+
       setSession(nextSession);
 
       if (nextSession?.user?.id) {
+        scheduleExpiry();
         try {
           const result = await api.getProfile(nextSession.user.id);
           if (active) {
@@ -45,12 +91,18 @@ export default function App() {
       loadForSession(data.session);
     });
 
-    const { data: listener } = supabase.auth.onAuthStateChange((_event, nextSession) => {
-      loadForSession(nextSession);
+    const { data: listener } = supabase.auth.onAuthStateChange((event, nextSession) => {
+      if (event === "SIGNED_OUT") {
+        clearSessionStarted();
+      }
+      loadForSession(nextSession, event);
     });
 
     return () => {
       active = false;
+      if (expiryTimer) {
+        window.clearTimeout(expiryTimer);
+      }
       listener.subscription.unsubscribe();
     };
   }, []);
@@ -66,7 +118,7 @@ export default function App() {
   };
 
   if (!session) {
-    return <AuthScreen />;
+    return <AuthScreen notice={authNotice} />;
   }
 
   if (loadingProfile) {
