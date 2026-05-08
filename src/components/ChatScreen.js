@@ -16,16 +16,35 @@ const OPENING_MESSAGES = {
   intake: "Hi, I’m Anupama in Intake Assistant mode. We can use this session to gather your story, what feels hardest lately, and what you want support with.",
 };
 
-export default function ChatScreen({ mode, profile, onSessionActivity, onOpenPage, onStartNextSession }) {
+export default function ChatScreen({
+  mode,
+  profile,
+  onSessionActivity,
+  onOpenPage,
+  onStartNextSession,
+  initialOpeningMessage,
+}) {
   const isMobile = useIsMobile();
-  const { messages, loading, send, homework, previousSummary, sessionMeta } = useChat(mode);
+  const { messages, loading, send, homework, previousSummary, sessionMeta, remainingSeconds } = useChat(mode);
   const bottomRef = useRef(null);
+  const closeRefreshRef = useRef(false);
   const meta = MODE_META[mode];
   const sessionEnded = Boolean(sessionMeta.sessionClosing);
+  const minutes = String(Math.floor(remainingSeconds / 60)).padStart(2, "0");
+  const seconds = String(remainingSeconds % 60).padStart(2, "0");
 
   useEffect(() => {
     bottomRef.current?.scrollIntoView({ behavior: "smooth" });
   }, [messages, loading]);
+
+  useEffect(() => {
+    if (sessionMeta.sessionClosing && !closeRefreshRef.current) {
+      closeRefreshRef.current = true;
+      onSessionActivity?.({ session_closing: true });
+    }
+  }, [sessionMeta.sessionClosing, onSessionActivity]);
+
+  const openingMessage = sessionMeta.openingMessage || initialOpeningMessage || OPENING_MESSAGES[mode];
 
   const allMessages = messages.length
     ? messages
@@ -33,7 +52,7 @@ export default function ChatScreen({ mode, profile, onSessionActivity, onOpenPag
         {
           id: "opening",
           role: "assistant",
-          content: OPENING_MESSAGES[mode],
+          content: openingMessage,
           timestamp: new Date().toISOString(),
         },
       ];
@@ -59,6 +78,9 @@ export default function ChatScreen({ mode, profile, onSessionActivity, onOpenPag
           </div>
         </div>
         <div style={styles.headerActions}>
+          <div style={styles.timerPill}>
+            {minutes}:{seconds}
+          </div>
           <button style={styles.secondaryBtn} onClick={() => onOpenPage?.("sessions")}>
             Sessions
           </button>
@@ -204,6 +226,16 @@ const styles = {
     padding: "10px 14px",
     fontSize: 12,
     cursor: "pointer",
+  },
+  timerPill: {
+    border: "1px solid rgba(200,148,74,0.22)",
+    background: "rgba(200,148,74,0.08)",
+    color: "#C8944A",
+    borderRadius: 999,
+    padding: "10px 14px",
+    fontSize: 12,
+    minWidth: 68,
+    textAlign: "center",
   },
   contextGrid: {
     display: "grid",

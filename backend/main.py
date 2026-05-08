@@ -25,6 +25,8 @@ from backend.openai_responder import generate_reply
 
 ROOT_DIR = Path(__file__).resolve().parent.parent
 DEFAULT_CHECKPOINT_DIR = ROOT_DIR / "checkpoints"
+SESSION_DURATION_SECONDS = 20 * 60
+SESSION_AUTO_CLOSE_SECONDS = 19 * 60
 
 
 class ChatRequest(BaseModel):
@@ -74,6 +76,10 @@ class ScheduleRequest(BaseModel):
     timezone: str = "America/Los_Angeles"
 
 
+class CloseSessionRequest(BaseModel):
+    mode: Literal["support", "cbt", "intake"] | None = None
+
+
 class ChatTurn(BaseModel):
     role: Literal["user", "assistant"]
     content: str
@@ -93,6 +99,13 @@ class SessionState(BaseModel):
 
 def utc_now() -> str:
     return datetime.now(timezone.utc).isoformat()
+
+
+def seconds_since(timestamp: str) -> int:
+    created = datetime.fromisoformat(timestamp.replace("Z", "+00:00"))
+    if created.tzinfo is None:
+        created = created.replace(tzinfo=timezone.utc)
+    return max(0, int((datetime.now(timezone.utc) - created).total_seconds()))
 
 
 SELF_HARM_PATTERNS = [
@@ -259,6 +272,21 @@ def build_homework_review_reply(message: str, pending_homework: list[dict]) -> s
     )
 
 
+def opening_message_for_mode(
+    mode: str,
+    *,
+    pending_homework: list[dict],
+    is_first_session: bool,
+) -> str:
+    if mode == "cbt" and pending_homework and not is_first_session:
+        return build_homework_review_reply("Checking in", pending_homework)
+    if mode == "support":
+        return "Hi, I’m Anupama. We can start gently. What has this week felt like for you?"
+    if mode == "cbt":
+        return "Hi, I’m Anupama in CBT Coach mode. We’ll start by understanding what has been weighing on you, then work toward one helpful next step."
+    return "Hi, I’m Anupama in Intake Assistant mode. We can use this session to gather your story, what feels hardest lately, and what you want support with."
+
+
 def get_auth_user(authorization: str | None):
     if not authorization or not authorization.lower().startswith("bearer "):
         raise HTTPException(status_code=401, detail="Authentication required")
@@ -320,6 +348,40 @@ def get_user_id_from_auth(authorization: str | None) -> str:
     return get_auth_user(authorization).id
 
 
+def build_session_context(user_id: str, session_id: str) -> dict:
+    profile = store.get_profile(user_id)
+    if not profile:
+        raise HTTPException(status_code=404, detail="Profile not found")
+    all_sessions = store.list_all_sessions(user_id)
+    all_homework = store.list_all_homework(user_id)
+    pending_homework = [item for item in all_homework if item.get("status") in {"assigned", "in_progress"}]
+    is_first_session = len(all_sessions) <= 1
+    memory_context = build_memory_context(
+        sessions=all_sessions,
+        current_session_id=session_id,
+        pending_homework=pending_homework,
+    )
+    treatment_plan = build_treatment_plan(
+        goals=profile.get("goals", []) or [],
+        session_count=len(all_sessions),
+        pending_homework_count=len(pending_homework),
+    )
+    homework_progress = assess_homework_progress(
+        homework_items=all_homework,
+        treatment_phase=treatment_plan["phase"],
+    )
+    return {
+        "profile": profile,
+        "all_sessions": all_sessions,
+        "all_homework": all_homework,
+        "pending_homework": pending_homework,
+        "is_first_session": is_first_session,
+        "memory_context": memory_context,
+        "treatment_plan": treatment_plan,
+        "homework_progress": homework_progress,
+    }
+
+
 def require_owned_session(session_id: str, authorization: str | None) -> dict:
     session = store.get_session(session_id)
     if session is None:
@@ -336,6 +398,145 @@ def require_owned_homework(homework_id: str, authorization: str | None) -> dict:
     if item["profile_id"] != get_user_id_from_auth(authorization):
         raise HTTPException(status_code=403, detail="Forbidden")
     return item
+
+
+def get_or_rehydrate_session_state(session_id: str, session_data: dict) -> SessionState:
+    session = SESSIONS.get(session_id)
+    if session is not None:
+        return session
+    messages = store.list_session_messages(session_id)
+    session = SessionState(
+        id=session_id,
+        created_at=session_data["created_at"],
+        history=[
+            ChatTurn(
+                role=message["role"],
+                content=message["content"],
+                timestamp=message["timestamp"],
+                mode=session_data.get("mode"),
+                mood_score=message.get("mood_score"),
+                distortion=message.get("distortion"),
+                is_crisis=message.get("is_crisis"),
+            )
+            for message in messages
+        ],
+        mood_log=store.get_session_mood(session_id),
+    )
+    SESSIONS[session_id] = session
+    return session
+
+
+def build_close_session_payload(
+    *,
+    engine: Anupama,
+    user_id: str,
+    session_data: dict,
+    session: SessionState,
+    mode: str,
+) -> dict:
+    context = build_session_context(user_id, session_data["id"])
+    messages = store.list_session_messages(session_data["id"])
+    last_user_message = next((message["content"] for message in reversed(messages) if message["role"] == "user"), "Let's wrap up this session.")
+    if not messages:
+        raise HTTPException(status_code=400, detail="Session has no messages to close")
+
+    classification = engine.classify(last_user_message)
+    reply_text = generate_reply(
+        message="Please help me wrap up this session, summarize the key takeaway, and set one realistic between-session practice.",
+        mode=mode,
+        history=[turn.model_dump() for turn in session.history],
+        profile=context["profile"],
+        memory_context=context["memory_context"],
+        pending_homework=context["pending_homework"],
+        homework_progress=context["homework_progress"],
+        should_close_session=True,
+        is_first_session=context["is_first_session"],
+        session_phase="closing",
+        treatment_phase=context["treatment_plan"]["phase"],
+        treatment_guidance=context["treatment_plan"]["guidance"],
+        mood_score=classification.mood_score,
+        distortion=classification.distortion,
+        crisis_label=classification.crisis_label,
+    )
+
+    assistant_turn = ChatTurn(
+        role="assistant",
+        content=reply_text,
+        timestamp=utc_now(),
+        mode=mode,
+        mood_score=classification.mood_score,
+        distortion=classification.distortion,
+        is_crisis=False,
+    )
+    session.history.append(assistant_turn)
+    store.add_message(
+        session_id=session_data["id"],
+        role="assistant",
+        content=reply_text,
+        timestamp=assistant_turn.timestamp,
+        mood_score=classification.mood_score,
+        distortion=classification.distortion,
+        is_crisis=False,
+    )
+
+    homework_item = None
+    homework_progress = context["homework_progress"]
+    if mode == "cbt" and not context["is_first_session"]:
+        title, instructions, homework_progress = suggest_progress_based_cbt_homework(
+            distortion=classification.distortion,
+            homework_items=context["all_homework"],
+            treatment_phase=context["treatment_plan"]["phase"],
+        )
+        homework_item = store.create_homework(
+            profile_id=user_id,
+            session_id=session_data["id"],
+            title=title,
+            instructions=instructions,
+            due_at=next_checkin_due(assistant_turn.timestamp),
+            now=assistant_turn.timestamp,
+        )
+
+    updated_messages = store.list_session_messages(session_data["id"])
+    store.update_session_summary(
+        session_data["id"],
+        summarize_session(
+            mode=mode,
+            messages=updated_messages,
+            distortion=classification.distortion,
+            mood_score=classification.mood_score,
+        ),
+        assistant_turn.timestamp,
+    )
+
+    elapsed_seconds = seconds_since(session_data["created_at"])
+    return {
+        "user_id": user_id,
+        "session_id": session_data["id"],
+        "reply": reply_text,
+        "timestamp": assistant_turn.timestamp,
+        "is_crisis": False,
+        "mood_score": classification.mood_score,
+        "valence": classification.valence,
+        "distortion": classification.distortion,
+        "crisis_label": classification.crisis_label,
+        "conditioning_tokens": engine._build_cond_tokens(classification, mode),
+        "homework": homework_item,
+        "homework_progress": homework_progress,
+        "previous_session_summary": context["memory_context"],
+        "pending_homework": context["pending_homework"],
+        "session_phase": "closing",
+        "session_closing": True,
+        "is_first_session": context["is_first_session"],
+        "treatment_plan": context["treatment_plan"],
+        "session_started_at": session_data["created_at"],
+        "session_elapsed_seconds": elapsed_seconds,
+        "session_time_remaining_seconds": max(0, SESSION_DURATION_SECONDS - elapsed_seconds),
+        "opening_message": opening_message_for_mode(
+            mode,
+            pending_homework=context["pending_homework"],
+            is_first_session=context["is_first_session"],
+        ),
+    }
 
 
 @lru_cache(maxsize=1)
@@ -524,9 +725,6 @@ def chat(payload: ChatRequest, authorization: str | None = Header(default=None))
         raise HTTPException(status_code=500, detail=str(exc)) from exc
 
     user_id = get_user_id_from_auth(authorization)
-    profile = store.get_profile(user_id)
-    if not profile:
-        raise HTTPException(status_code=404, detail="Profile not found")
 
     session_data = store.get_session(payload.session_id) if payload.session_id else None
     if payload.session_id and not session_data:
@@ -544,10 +742,11 @@ def chat(payload: ChatRequest, authorization: str | None = Header(default=None))
         )
         session_id = session_data["id"]
 
-    session = SESSIONS.get(session_id)
-    if session is None:
-        session = SessionState(id=session_id, created_at=utc_now())
-        SESSIONS[session_id] = session
+    session = get_or_rehydrate_session_state(session_id, session_data)
+
+    elapsed_seconds = seconds_since(session_data["created_at"])
+    if elapsed_seconds >= SESSION_DURATION_SECONDS:
+        raise HTTPException(status_code=409, detail="This session has ended. Start a new session to continue.")
 
     user_turn = ChatTurn(
         role="user",
@@ -568,31 +767,20 @@ def chat(payload: ChatRequest, authorization: str | None = Header(default=None))
     violence_disclosure = has_pattern(payload.message, VIOLENCE_PATTERNS)
     is_crisis = classification.crisis_label == "crisis" and explicit_self_harm
     conditioning_tokens = engine._build_cond_tokens(classification, payload.mode) if not is_crisis else []
-    all_sessions = store.list_all_sessions(user_id)
-    all_homework = store.list_all_homework(user_id)
-    pending_homework = [item for item in all_homework if item.get("status") in {"assigned", "in_progress"}]
-    is_first_session = len(all_sessions) <= 1
-    memory_context = build_memory_context(
-        sessions=all_sessions,
-        current_session_id=session_id,
-        pending_homework=pending_homework,
-    )
-    treatment_plan = build_treatment_plan(
-        goals=profile.get("goals", []) or [],
-        session_count=len(all_sessions),
-        pending_homework_count=len(pending_homework),
-    )
-    homework_progress = assess_homework_progress(
-        homework_items=all_homework,
-        treatment_phase=treatment_plan["phase"],
-    )
+    context = build_session_context(user_id, session_id)
+    profile = context["profile"]
+    all_homework = context["all_homework"]
+    pending_homework = context["pending_homework"]
+    is_first_session = context["is_first_session"]
+    treatment_plan = context["treatment_plan"]
+    homework_progress = context["homework_progress"]
     session_phase = detect_session_phase(
         payload.mode,
         session.history,
         is_first_session=is_first_session,
         message=payload.message.strip(),
     )
-    closing = should_close_session(
+    closing = elapsed_seconds >= SESSION_AUTO_CLOSE_SECONDS or should_close_session(
         payload.mode,
         session.history,
         payload.message.strip(),
@@ -619,7 +807,7 @@ def chat(payload: ChatRequest, authorization: str | None = Header(default=None))
                 mode=payload.mode,
                 history=[turn.model_dump() for turn in session.history[:-1]],
                 profile=profile,
-                memory_context=memory_context,
+                memory_context=context["memory_context"],
                 pending_homework=pending_homework,
                 homework_progress=homework_progress,
                 should_close_session=closing,
@@ -695,13 +883,41 @@ def chat(payload: ChatRequest, authorization: str | None = Header(default=None))
         "conditioning_tokens": conditioning_tokens,
         "homework": homework_item,
         "homework_progress": homework_progress,
-        "previous_session_summary": memory_context,
+        "previous_session_summary": context["memory_context"],
         "pending_homework": pending_homework,
         "session_phase": session_phase,
         "session_closing": closing,
         "is_first_session": is_first_session,
         "treatment_plan": treatment_plan,
+        "session_started_at": session_data["created_at"],
+        "session_elapsed_seconds": elapsed_seconds,
+        "session_time_remaining_seconds": max(0, SESSION_DURATION_SECONDS - elapsed_seconds),
+        "opening_message": opening_message_for_mode(
+            payload.mode,
+            pending_homework=pending_homework,
+            is_first_session=is_first_session,
+        ),
     }
+
+
+@app.post("/session/{session_id}/close")
+def close_session(session_id: str, payload: CloseSessionRequest, authorization: str | None = Header(default=None)):
+    try:
+        engine = load_engine()
+    except Exception as exc:
+        raise HTTPException(status_code=500, detail=str(exc)) from exc
+
+    session_data = require_owned_session(session_id, authorization)
+    user_id = get_user_id_from_auth(authorization)
+    mode = payload.mode or session_data.get("mode") or "support"
+    session = get_or_rehydrate_session_state(session_id, session_data)
+    return build_close_session_payload(
+        engine=engine,
+        user_id=user_id,
+        session_data=session_data,
+        session=session,
+        mode=mode,
+    )
 
 
 @app.post("/mood/{session_id}")

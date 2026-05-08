@@ -22,6 +22,12 @@ export const api = {
       body: JSON.stringify({ session_id: sessionId, message, mode }),
     }),
 
+  closeSession: (sessionId, mode) =>
+    request(`/session/${sessionId}/close`, {
+      method: "POST",
+      body: JSON.stringify({ mode }),
+    }),
+
   logMood: (sessionId, score, note = null) =>
     request(`/mood/${sessionId}`, {
       method: "POST",

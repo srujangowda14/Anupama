@@ -33,7 +33,8 @@ BASE_INSTRUCTIONS = (
     "requires them. If the user appears at immediate risk of self-harm, encourage urgent human "
     "support and keep the response direct. When appropriate, reflect the connection between "
     "thoughts, feelings, and actions. Prefer collaborative language like 'let's look at that' "
-    "instead of sounding authoritative."
+    "instead of sounding authoritative. Do not end most replies with formulaic check-ins like "
+    "'How does that sound?' or 'How does that feel?'; vary your endings and use those sparingly."
 )
 
 
@@ -141,4 +142,7 @@ def generate_reply(
     text = (response.choices[0].message.content or "").strip()
     if not text:
         raise RuntimeError("Hugging Face response was empty")
+    if not should_close_session:
+        text = text.removesuffix(" How does that sound?").removesuffix("How does that sound?").strip()
+        text = text.removesuffix(" How does that feel?").removesuffix("How does that feel?").strip()
     return text

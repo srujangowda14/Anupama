@@ -24,6 +24,21 @@ function pageFromHash() {
   return NAV_ITEMS.some((item) => item.id === raw) ? raw : "chat";
 }
 
+function buildOpeningMessage(mode, dashboard) {
+  const pendingHomework = dashboard?.pending_homework?.[0];
+  const completedSessions = dashboard?.treatment_plan?.completed_sessions || 0;
+  if (mode === "cbt" && pendingHomework && completedSessions > 1) {
+    return `Before we dive into anything new, how did it go with ${pendingHomework.title} from last time? What felt doable, and what got in the way if it was hard to complete?`;
+  }
+  if (mode === "support") {
+    return "Hi, I’m Anupama. We can start gently. What has this week felt like for you?";
+  }
+  if (mode === "cbt") {
+    return "Hi, I’m Anupama in CBT Coach mode. We’ll start by understanding what has been weighing on you, then work toward one helpful next step.";
+  }
+  return "Hi, I’m Anupama in Intake Assistant mode. We can use this session to gather your story, what feels hardest lately, and what you want support with.";
+}
+
 function escapeIcsText(value = "") {
   return value
     .replace(/\\/g, "\\\\")
@@ -264,6 +279,7 @@ export default function WorkspaceShell({ profile, session, onProfileUpdate }) {
             onSessionActivity={refreshDashboard}
             onOpenPage={goTo}
             onStartNextSession={startSession}
+            initialOpeningMessage={buildOpeningMessage(mode, dashboard)}
           />
         </section>
 
